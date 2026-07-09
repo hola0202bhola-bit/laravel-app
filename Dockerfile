@@ -18,7 +18,7 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-av
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
 # Configure Apache port to listen to Render's dynamic PORT env var
-RUN sed -i 's/80/${PORT}/g' /etc/apache2/sites-available/0000-default.conf /etc/apache2/sites-available/default-ssl.conf /etc/apache2/ports.conf
+RUN sed -i 's/80/${PORT}/g' /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/default-ssl.conf /etc/apache2/ports.conf
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
