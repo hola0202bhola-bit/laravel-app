@@ -30,6 +30,9 @@
                 </div>
             </div>
             <div class="header-actions">
+                <a href="/cliente" class="btn-secondary" style="text-decoration:none; border-color: rgba(99, 102, 241, 0.4); color: #818cf8;">
+                    <i data-lucide="shopping-bag"></i> Ver Menú Cliente
+                </a>
                 <a href="/cocina" target="_blank" class="btn-primary" style="text-decoration:none; background:linear-gradient(135deg, #ef4444, #b91c1c);">
                     <i data-lucide="chef-hat"></i> Pantalla de Cocina (KDS)
                 </a>

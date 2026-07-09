@@ -28,6 +28,9 @@
                 </div>
             </div>
             <div class="header-actions">
+                <a href="/empleado" class="btn-secondary" style="text-decoration:none; margin-right: 12px;">
+                    <i data-lucide="arrow-left"></i> Volver a Admin
+                </a>
                 <div class="live-status-badge">
                     <span class="status-dot pulsing"></span>
                     <span>Sistema de Cocina Activo</span>

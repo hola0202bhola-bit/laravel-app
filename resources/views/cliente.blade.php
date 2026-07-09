@@ -28,6 +28,9 @@
                 </div>
             </div>
             <div class="header-actions">
+                <a href="/empleado" class="btn-secondary" style="text-decoration:none; border-color: rgba(245, 158, 11, 0.4); color: #f59e0b;">
+                    <i data-lucide="lock"></i> Panel Empleado
+                </a>
                 <button type="button" class="btn-secondary" id="open-builder-btn" style="background:linear-gradient(135deg, #6366f1, #4f46e5); color:white; border:none;">
                     <i data-lucide="sparkles"></i> Crear Bebida Desde Cero
                 </button>
