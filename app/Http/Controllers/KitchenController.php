@@ -44,4 +44,39 @@ class KitchenController extends Controller
             'order' => $order
         ]);
     }
+
+    public function updateItemStatus(Request $request)
+    {
+        $validated = $request->validate([
+            'order_id' => 'required|integer',
+            'item_id' => 'required|string',
+            'estado' => 'required|string|in:pendiente,en_preparacion,listo,cancelado'
+        ]);
+
+        $order = Order::findOrFail($validated['order_id']);
+        $items = $order->items;
+        $updated = false;
+
+        if (is_array($items)) {
+            foreach ($items as &$item) {
+                if (isset($item['id']) && $item['id'] === $validated['item_id']) {
+                    $item['estado'] = $validated['estado'];
+                    $updated = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$updated) {
+            return response()->json(['error' => 'Error: Producto no encontrado en el pedido.'], 404);
+        }
+
+        $order->items = $items;
+        $order->save();
+
+        return response()->json([
+            'message' => "Éxito: Estado del producto actualizado a '{$validated['estado']}'.",
+            'order' => $order
+        ]);
+    }
 }

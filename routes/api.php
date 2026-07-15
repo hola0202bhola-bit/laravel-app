@@ -29,5 +29,6 @@ Route::post('/reservaciones/crear', [ReservationController::class, 'store']);
 
 Route::get('/cocina/pedidos', [KitchenController::class, 'index']);
 Route::post('/cocina/estado', [KitchenController::class, 'updateStatus']);
+Route::post('/cocina/items/estado', [KitchenController::class, 'updateItemStatus']);
 
 Route::get('/analytics/stats', [AnalyticsController::class, 'stats']);
