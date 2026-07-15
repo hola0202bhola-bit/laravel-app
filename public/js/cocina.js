@@ -39,6 +39,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function changeItemStatus(orderId, itemId, nextState) {
+        try {
+            await fetch('/api/cocina/items/estado', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_id: orderId, item_id: itemId, estado: nextState })
+            });
+            fetchKitchenOrders();
+        } catch (e) {
+            console.error('Error updating item state', e);
+        }
+    }
+
     function renderKanbanBoard() {
         cardsPendiente.innerHTML = '';
         cardsPreparacion.innerHTML = '';
@@ -83,11 +96,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? `<div class="kds-item-extras">+ ${item.extras.map(e => e.nombre).join(', ')}</div>`
                 : '';
 
+            const statusVal = item.estado || 'pendiente';
+            let badgeColor = '#ef4444'; // Red for pending/canceled
+            if (statusVal === 'en_preparacion') badgeColor = '#f59e0b'; // Amber
+            if (statusVal === 'listo') badgeColor = '#10b981'; // Green
+
+            let actionsHTML = '';
+            if (statusVal === 'pendiente') {
+                actionsHTML = `
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <button type="button" class="btn-start-item" data-item-id="${item.id}" style="background-color:#f59e0b; color:#111827; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:700; cursor:pointer;" title="Iniciar"><i data-lucide="play" style="width:12px; height:12px;"></i></button>
+                        <button type="button" class="btn-cancel-item" data-item-id="${item.id}" style="background-color:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:700; cursor:pointer;" title="Cancelar"><i data-lucide="x" style="width:12px; height:12px;"></i></button>
+                    </div>
+                `;
+            } else if (statusVal === 'en_preparacion') {
+                actionsHTML = `
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <button type="button" class="btn-finish-item" data-item-id="${item.id}" style="background-color:#10b981; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:700; cursor:pointer;" title="Listo"><i data-lucide="check" style="width:12px; height:12px;"></i></button>
+                        <button type="button" class="btn-cancel-item" data-item-id="${item.id}" style="background-color:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:700; cursor:pointer;" title="Cancelar"><i data-lucide="x" style="width:12px; height:12px;"></i></button>
+                    </div>
+                `;
+            } else {
+                actionsHTML = `<span style="font-size:0.75rem; font-weight:700; padding:2px 6px; border-radius:4px; color:${badgeColor}; background:rgba(255,255,255,0.05); text-transform:uppercase;">${statusVal}</span>`;
+            }
+
             itemsHTML += `
-                <div>
-                    <div class="kds-item-row">
-                        <span>${item.nombre} (${item.tamano})</span>
-                        <span>x${item.cantidad}</span>
+                <div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <div class="kds-item-row" style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:600; color:${statusVal === 'cancelado' ? 'var(--text-muted)' : 'white'}; text-decoration:${statusVal === 'cancelado' ? 'line-through' : 'none'};">
+                            ${item.nombre} (${item.tamano}) x${item.cantidad}
+                        </span>
+                        ${actionsHTML}
                     </div>
                     ${extrasText}
                 </div>
@@ -98,13 +137,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (colType === 'pending') {
             actionBtnHTML = `
                 <button type="button" class="btn-kds-action btn-kds-start">
-                    <i data-lucide="play"></i> Iniciar Preparación
+                    <i data-lucide="play"></i> Iniciar Todo
                 </button>
             `;
         } else if (colType === 'prep') {
             actionBtnHTML = `
                 <button type="button" class="btn-kds-action btn-kds-finish">
-                    <i data-lucide="check-circle-2"></i> Marcar Listo
+                    <i data-lucide="check-circle-2"></i> Terminar Todo
                 </button>
             `;
         } else {
@@ -130,19 +169,31 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="font-size:0.8rem; color:var(--text-muted); font-weight:600;">
                 Destino: <strong style="color:white;">${destStr}</strong>
             </div>
-            <div class="kds-items-list">
+            <div class="kds-items-list" style="margin-top:10px;">
                 ${itemsHTML}
             </div>
-            <div class="kds-card-actions">
+            <div class="kds-card-actions" style="margin-top:12px;">
                 ${actionBtnHTML}
             </div>
         `;
 
+        // Attach global status actions
         if (colType === 'pending') {
             card.querySelector('.btn-kds-start').addEventListener('click', () => changeOrderStatus(order.id, 'en_preparacion'));
         } else if (colType === 'prep') {
             card.querySelector('.btn-kds-finish').addEventListener('click', () => changeOrderStatus(order.id, 'listo'));
         }
+
+        // Attach individual item action listeners
+        card.querySelectorAll('.btn-start-item').forEach(btn => {
+            btn.addEventListener('click', () => changeItemStatus(order.id, btn.getAttribute('data-item-id'), 'en_preparacion'));
+        });
+        card.querySelectorAll('.btn-finish-item').forEach(btn => {
+            btn.addEventListener('click', () => changeItemStatus(order.id, btn.getAttribute('data-item-id'), 'listo'));
+        });
+        card.querySelectorAll('.btn-cancel-item').forEach(btn => {
+            btn.addEventListener('click', () => changeItemStatus(order.id, btn.getAttribute('data-item-id'), 'cancelado'));
+        });
 
         return card;
     }
