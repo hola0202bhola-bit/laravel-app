@@ -212,7 +212,93 @@ class KitchenSecurityTest extends TestCase
 
         $response = $this->withHeaders(['X-Tracking-Token' => $token])
                          ->getJson('/api/pedidos/seguimiento');
-                         
+
         $response->assertStatus(429);
+    }
+
+    public function test_sanctum_token_expiration_returns_401()
+    {
+        // Set Sanctum token expiration to 480 minutes (8 hours)
+        config(['sanctum.expiration' => 480]);
+
+        $user = User::factory()->create();
+        $user->roles()->attach(2); // Barista/Cocinero
+        $tokenModel = $user->createToken('TestToken');
+        $token = $tokenModel->plainTextToken;
+
+        // Force token creation time to 10 hours ago (exceeding expiration of 8 hours / 480 min)
+        DB::table('personal_access_tokens')
+            ->where('id', $tokenModel->accessToken->id)
+            ->update(['created_at' => now()->subHours(10)]);
+
+        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->getJson('/api/cocina/pedidos');
+
+        $response->assertStatus(401);
+    }
+
+    public function test_cook_role_blocked_from_commercial_status_update()
+    {
+        $user = User::factory()->create();
+        $user->roles()->attach(2); // Barista/Cocinero
+
+        $order = Order::create([
+            'estado' => 'pendiente',
+            'estado_preparacion' => 'pendiente',
+            'total' => 35,
+            'items' => []
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/pedidos/estado', [
+            'id' => $order->id,
+            'estado' => 'en_preparacion'
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_manager_role_authorized_for_commercial_status_update()
+    {
+        $roleManager = Role::create(['id' => 5, 'nombre' => 'Gerente']);
+        $user = User::factory()->create();
+        $user->roles()->attach($roleManager);
+
+        $order = Order::create([
+            'estado' => 'pendiente',
+            'estado_preparacion' => 'pendiente',
+            'total' => 35,
+            'items' => []
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/pedidos/estado', [
+            'id' => $order->id,
+            'estado' => 'en_preparacion'
+        ]);
+
+        $response->assertStatus(200);
+        $order->refresh();
+        $this->assertEquals('en_preparacion', $order->estado);
+    }
+
+    public function test_admin_role_authorized_for_commercial_status_update()
+    {
+        $user = User::factory()->create();
+        $user->roles()->attach(1); // Administrador
+
+        $order = Order::create([
+            'estado' => 'pendiente',
+            'estado_preparacion' => 'pendiente',
+            'total' => 35,
+            'items' => []
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/pedidos/estado', [
+            'id' => $order->id,
+            'estado' => 'en_preparacion'
+        ]);
+
+        $response->assertStatus(200);
+        $order->refresh();
+        $this->assertEquals('en_preparacion', $order->estado);
     }
 }

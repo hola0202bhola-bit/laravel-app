@@ -364,4 +364,77 @@ class KitchenTest extends TestCase
         $this->assertEquals('pendiente', $globalAudit->estado_anterior);
         $this->assertEquals('en_preparacion', $globalAudit->estado_nuevo);
     }
+
+    public function test_global_finish_action_generates_granular_item_audit_logs()
+    {
+        $order = Order::create([
+            'estado' => 'pendiente',
+            'estado_preparacion' => 'en_preparacion',
+            'items' => [
+                ['id' => 'item_1', 'nombre' => 'Espresso', 'estado' => 'en_preparacion'],
+                ['id' => 'item_2', 'nombre' => 'Latte', 'estado' => 'pendiente']
+            ],
+            'total' => 65
+        ]);
+
+        $this->actingAs($this->cookUser)->postJson('/api/cocina/estado', [
+            'order_id' => $order->id,
+            'estado' => 'listo'
+        ]);
+
+        // Should write 2 item audits plus 1 global audit
+        $audits = DB::table('order_status_histories')
+            ->where('order_id', $order->id)
+            ->get();
+
+        $itemAudits = $audits->whereNotNull('item_id');
+        $this->assertCount(2, $itemAudits);
+        $this->assertContains('item_1', $itemAudits->pluck('item_id')->toArray());
+        $this->assertContains('item_2', $itemAudits->pluck('item_id')->toArray());
+
+        $globalAudit = $audits->whereNull('item_id')->first();
+        $this->assertNotNull($globalAudit);
+        $this->assertEquals('en_preparacion', $globalAudit->estado_anterior);
+        $this->assertEquals('listo', $globalAudit->estado_nuevo);
+    }
+
+    public function test_no_duplicate_audits_recorded_during_optimistic_lock_retries()
+    {
+        $order = Order::create([
+            'estado' => 'pendiente',
+            'estado_preparacion' => 'pendiente',
+            'lock_version' => 1,
+            'items' => [['id' => 'item_1', 'nombre' => 'Coffee', 'estado' => 'pendiente']],
+            'total' => 35
+        ]);
+
+        // Set up Order retrieved hook to increment version on the first retrieve only, forcing a retry that succeeds on the 2nd attempt
+        $retrievedCount = 0;
+        Order::retrieved(function ($retrievedOrder) use ($order, &$retrievedCount) {
+            if ($retrievedOrder->id === $order->id) {
+                $retrievedCount++;
+                if ($retrievedCount === 1) {
+                    DB::table('orders')->where('id', $order->id)->increment('lock_version');
+                }
+            }
+        });
+
+        $response = $this->actingAs($this->cookUser)->postJson('/api/cocina/items/estado', [
+            'order_id' => $order->id,
+            'item_id' => 'item_1',
+            'estado' => 'en_preparacion'
+        ]);
+
+        $response->assertStatus(200); // Succeeds on second attempt
+
+        // Verify only 1 audit log was written in the database (failed attempt rolled back)
+        $audits = DB::table('order_status_histories')
+            ->where('order_id', $order->id)
+            ->where('item_id', 'item_1')
+            ->get();
+
+        $this->assertCount(1, $audits);
+        $this->assertEquals('pendiente', $audits[0]->estado_anterior);
+        $this->assertEquals('en_preparacion', $audits[0]->estado_nuevo);
+    }
 }
