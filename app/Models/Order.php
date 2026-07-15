@@ -16,17 +16,7 @@ class Order extends Model
         'total' => 'float'
     ];
 
-    protected static function boot()
-    {
-        parent::boot();
-
-        static::saving(function (Order $order) {
-            // Recalculate status based on individual items
-            $order->estado = $order->recalculateStatus();
-        });
-    }
-
-    public function recalculateStatus(): string
+    public function recalculatePreparationStatus(): string
     {
         $items = $this->items ?? [];
         if (empty($items)) {
