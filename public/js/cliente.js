@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let cart = [];
     let currentProduct = null;
     let selectedQuantity = 1;
+    let lastOrderId = null;
+    let orderTrackingInterval = null;
 
     let activeTag = '';
     let activeAllergen = '';
@@ -517,11 +519,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 cart = [];
                 updateCartUI();
                 checkoutModal.classList.remove('active');
+
+                // Start tracking order items status
+                if (data.pedido && data.pedido.id) {
+                    lastOrderId = data.pedido.id;
+                    if (orderTrackingInterval) clearInterval(orderTrackingInterval);
+                    orderTrackingInterval = setInterval(trackOrderProgress, 5000);
+                    trackOrderProgress();
+                }
             } else {
                 logToTerminal(data.error || 'Error al enviar pedido.');
             }
         } catch (err) { logToTerminal('Error de conexión al enviar pedido.'); }
     });
+
+    async function trackOrderProgress() {
+        if (!lastOrderId) return;
+        try {
+            const res = await fetch(`/api/pedidos?t=` + Date.now());
+            const ordersList = await res.json();
+            const myOrder = ordersList.find(o => o.id === lastOrderId);
+            if (myOrder) {
+                const itemsStatus = myOrder.items.map(i => `[${i.nombre}: ${(i.estado || 'pendiente').toUpperCase()}]`).join(' ');
+                logToTerminal(`Avance del Pedido #${myOrder.id}: ${myOrder.estado.toUpperCase()} | ${itemsStatus}`);
+                
+                if (myOrder.estado === 'listo' || myOrder.estado === 'entregado' || myOrder.estado === 'cancelado' || myOrder.estado === 'rechazado') {
+                    clearInterval(orderTrackingInterval);
+                    orderTrackingInterval = null;
+                    lastOrderId = null;
+                }
+            }
+        } catch (e) {}
+    }
 
     printTicketBtn.addEventListener('click', () => window.print());
     searchInput.addEventListener('input', renderCatalog);
