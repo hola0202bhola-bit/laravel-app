@@ -183,9 +183,9 @@ class KitchenSecurityTest extends TestCase
             'total' => 35
         ]);
 
-        // Listen to DB updates and artificially increment lock_version in DB to force mismatch retry failures
-        DB::listen(function ($query) use ($order) {
-            if (str_contains($query->sql, 'update "orders"') || str_contains($query->sql, 'update `orders`')) {
+        // Hook into Order retrieved event to increment version in DB, forcing mismatch on update
+        Order::retrieved(function ($retrievedOrder) use ($order) {
+            if ($retrievedOrder->id === $order->id) {
                 DB::table('orders')->where('id', $order->id)->increment('lock_version');
             }
         });
