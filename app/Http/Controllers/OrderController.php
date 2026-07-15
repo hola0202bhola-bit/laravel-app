@@ -61,6 +61,8 @@ class OrderController extends Controller
             $grandTotal += $subtotal;
 
             $processedItems[] = [
+                'id' => 'item_' . \Illuminate\Support\Str::random(10),
+                'estado' => 'pendiente',
                 'codigo' => $product->codigo,
                 'nombre' => $product->nombre,
                 'tamano' => $item['tamano'] ?? 'Chico',
