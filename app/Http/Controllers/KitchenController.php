@@ -27,7 +27,18 @@ class KitchenController extends Controller
         $order = Order::findOrFail($validated['order_id']);
         $estadoAnterior = $order->estado;
 
-        $order->update(['estado' => $validated['estado']]);
+        // Update all non-cancelled items to the new state
+        $items = $order->items;
+        if (is_array($items)) {
+            foreach ($items as &$item) {
+                if (($item['estado'] ?? 'pendiente') !== 'cancelado') {
+                    $item['estado'] = $validated['estado'];
+                }
+            }
+        }
+
+        $order->items = $items;
+        $order->save();
 
         // Record Audit History
         DB::table('order_status_histories')->insert([
