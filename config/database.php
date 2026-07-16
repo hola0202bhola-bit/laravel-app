@@ -41,6 +41,9 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+            'options' => env('DB_SQLITE_READONLY', false) ? [
+                \PDO::SQLITE_ATTR_OPEN_FLAGS => \PDO::SQLITE_OPEN_READONLY,
+            ] : [],
         ],
 
         'mysql' => [
@@ -75,7 +78,25 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'search_path' => 'public',
-            'sslmode' => 'prefer',
+            'sslmode' => env('DB_SSLMODE', 'prefer'),
+        ],
+
+        'pgsql_direct' => [
+            'driver' => 'pgsql',
+            'url' => env('DB_DIRECT_URL') ?: env('DATABASE_URL'),
+            'host' => env('DB_DIRECT_HOST') ?: env('DB_HOST', '127.0.0.1'),
+            'port' => env('DB_DIRECT_PORT') ?: env('DB_PORT', '5432'),
+            'database' => env('DB_DIRECT_DATABASE') ?: env('DB_DATABASE', 'forge'),
+            'username' => env('DB_DIRECT_USERNAME') ?: env('DB_USERNAME', 'forge'),
+            'password' => env('DB_DIRECT_PASSWORD') ?: env('DB_PASSWORD', ''),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => env('DB_DIRECT_SSLMODE') ?: env('DB_SSLMODE', 'require'),
+            'options' => [
+                PDO::ATTR_TIMEOUT => 300,
+            ],
         ],
 
         'sqlsrv' => [

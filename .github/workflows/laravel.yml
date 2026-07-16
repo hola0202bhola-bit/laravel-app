@@ -1,0 +1,85 @@
+name: Laravel CI
+
+on:
+  push:
+    branches: [ main, feature/migrate-to-postgresql, fix/kds-item-status-hardening ]
+  pull_request:
+    branches: [ main, fix/kds-item-status-hardening ]
+
+jobs:
+  laravel-tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: laravel_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, xml, ctype, iconv, pdo_sqlite, pdo_pgsql, bcmath
+
+    - name: Copy .env
+      run: php -r "file_exists('.env') || copy('.env.example', '.env');"
+
+    - name: Install Dependencies
+      run: composer install --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
+
+    - name: Generate key
+      run: php artisan key:generate
+
+    - name: Print PostgreSQL Environment and Version
+      env:
+        DB_CONNECTION: pgsql
+        DB_HOST: 127.0.0.1
+        DB_PORT: 5432
+        DB_DATABASE: laravel_test
+        DB_USERNAME: postgres
+        DB_PASSWORD: password
+      run: |
+        echo "Database connection configured: $DB_CONNECTION"
+        php -r "
+          try {
+            \$pdo = new PDO('pgsql:host=127.0.0.1;port=5432;dbname=laravel_test', 'postgres', 'password');
+            echo 'PostgreSQL Server Version: ' . \$pdo->query('SELECT version()')->fetchColumn() . PHP_EOL;
+          } catch (\Exception \$e) {
+            echo 'Error: ' . \$e->getMessage() . PHP_EOL;
+            exit(1);
+          }
+        "
+
+    - name: Run Schema Migrations
+      env:
+        DB_CONNECTION: pgsql
+        DB_HOST: 127.0.0.1
+        DB_PORT: 5432
+        DB_DATABASE: laravel_test
+        DB_USERNAME: postgres
+        DB_PASSWORD: password
+      run: php artisan migrate:fresh
+
+    - name: Run Tests (PostgreSQL)
+      env:
+        DB_CONNECTION: pgsql
+        DB_HOST: 127.0.0.1
+        DB_PORT: 5432
+        DB_DATABASE: laravel_test
+        DB_USERNAME: postgres
+        DB_PASSWORD: password
+        MIGRATION_REQUIRE_PGSQL: true
+      run: php artisan test
