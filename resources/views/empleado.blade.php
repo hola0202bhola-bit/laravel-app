@@ -123,7 +123,7 @@
                 <div class="sales-history-block glass-card">
                     <div class="sales-history-header">
                         <i data-lucide="calendar"></i>
-                        <h2>Reservaciones de Mesas Activas</h2>
+                        <div><h2>Gestión de Reservaciones</h2><small>Disponibilidad calculada en bloques de 90 minutos.</small></div>
                     </div>
                     <div class="table-container">
                         <table class="sales-table">
@@ -135,6 +135,8 @@
                                     <th>Fecha & Hora</th>
                                     <th>Personas</th>
                                     <th>Mesa</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
                                 </tr>
                             </thead>
                             <tbody id="reservations-table-body">
@@ -380,6 +382,40 @@
                         <i data-lucide="save"></i> Guardar Cambios
                     </button>
                     <button type="button" class="btn-secondary" id="delete-product">Eliminar producto</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: EDITAR RESERVACIÓN -->
+    <div class="modal-overlay" id="edit-reservation-modal">
+        <div class="modal-card glass-card">
+            <div class="modal-header">
+                <h3><i data-lucide="calendar-clock"></i> Editar Reservación</h3>
+                <button type="button" class="btn-close-modal" id="close-reservation-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-reservation" class="action-form">
+                    <input type="hidden" id="reservation-id">
+                    <div class="form-row">
+                        <div class="form-group"><label for="reservation-date">Fecha</label><input type="date" id="reservation-date" required></div>
+                        <div class="form-group"><label for="reservation-time">Hora</label><input type="time" id="reservation-time" required></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label for="reservation-people">Personas</label><input type="number" id="reservation-people" min="1" required></div>
+                        <div class="form-group"><label for="reservation-table">Mesa</label><select id="reservation-table" required></select></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="reservation-status">Estado</label>
+                        <select id="reservation-status" required>
+                            <option value="pendiente">Pendiente</option>
+                            <option value="confirmada">Confirmada</option>
+                            <option value="ocupada">Ocupada</option>
+                            <option value="finalizada">Finalizada</option>
+                            <option value="cancelada">Cancelada</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn-primary"><i data-lucide="save"></i> Guardar Reservación</button>
                 </form>
             </div>
         </div>

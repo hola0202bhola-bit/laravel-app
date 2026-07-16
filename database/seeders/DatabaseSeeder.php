@@ -224,5 +224,14 @@ class DatabaseSeeder extends Seeder
                 'notas' => 'Reserva de ejemplo para la presentación',
             ]
         );
+
+        DiningTable::each(function (DiningTable $table) {
+            $activeStates = $table->activeReservations()->pluck('estado');
+            $table->update([
+                'estado' => $activeStates->contains('ocupada')
+                    ? 'ocupada'
+                    : ($activeStates->isNotEmpty() ? 'reservada' : 'libre'),
+            ]);
+        });
     }
 }

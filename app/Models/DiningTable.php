@@ -14,4 +14,9 @@ class DiningTable extends Model
     {
         return $this->hasMany(TableReservation::class);
     }
+
+    public function activeReservations()
+    {
+        return $this->reservations()->whereIn('estado', ['pendiente', 'confirmada', 'ocupada']);
+    }
 }

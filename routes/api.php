@@ -13,6 +13,7 @@ use App\Http\Controllers\Admin\AdminCategoryController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminInventoryController;
 use App\Http\Controllers\Admin\AdminProductController;
+use App\Http\Controllers\Admin\AdminReservationController;
 
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
@@ -46,7 +47,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin.access'])->group(func
     Route::get('/orders', [OrderController::class, 'index']);
     Route::get('/sales', [OrderController::class, 'sales']);
     Route::get('/analytics', [AnalyticsController::class, 'stats']);
-    Route::get('/reservations', [ReservationController::class, 'index']);
+    Route::patch('/reservations/{reservation}/status', [AdminReservationController::class, 'updateStatus']);
+    Route::apiResource('reservations', AdminReservationController::class)
+        ->only(['index', 'show', 'update', 'destroy']);
 
     Route::apiResource('categories', AdminCategoryController::class);
     Route::apiResource('products', AdminProductController::class)
