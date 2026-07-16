@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let inventoryHistory = [];
     let employees = [];
     let employeeRoles = [];
+    let reportData = null;
     const adminToken = document.querySelector('meta[name="admin-api-token"]')?.content;
 
     async function adminFetch(path, options = {}) {
@@ -21,9 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Chart instances
-    let chartSalesTrend = null;
-    let chartTopProducts = null;
-    let chartPaymentMethods = null;
+    let chartDailySales = null;
 
     // DOM References
     const productsGrid = document.getElementById('products-grid');
@@ -81,6 +80,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const employeePassword = document.getElementById('employee-password');
     const employeeModalTitle = document.getElementById('employee-modal-title');
     const employeePasswordHelp = document.getElementById('employee-password-help');
+    const reportFilterForm = document.getElementById('report-filter-form');
+    const reportStart = document.getElementById('report-start');
+    const reportEnd = document.getElementById('report-end');
+    const reportTotalSales = document.getElementById('report-total-sales');
+    const reportOrderCount = document.getElementById('report-order-count');
+    const reportAverageTicket = document.getElementById('report-average-ticket');
+    const reportTopProducts = document.getElementById('report-top-products');
+    const reportOrderStatus = document.getElementById('report-order-status');
+    const reportLowInventory = document.getElementById('report-low-inventory');
+    const reportEmptyMessage = document.getElementById('report-empty-message');
+    const exportSalesButton = document.getElementById('export-sales');
+    const exportOrdersButton = document.getElementById('export-orders');
 
     lucide.createIcons();
 
@@ -126,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshAllData() {
         try {
-            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchTables(), fetchAnalytics(), fetchCategories(), fetchInventoryHistory(), fetchEmployees()]);
+            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchTables(), fetchReport(), fetchCategories(), fetchInventoryHistory(), fetchEmployees()]);
             updateStats();
             renderCatalog();
             updateDropdowns();
@@ -168,12 +179,23 @@ document.addEventListener('DOMContentLoaded', () => {
         updateReservationTables();
     }
 
-    async function fetchAnalytics() {
-        try {
-            const res = await adminFetch('/analytics?t=' + Date.now());
-            const data = await res.json();
-            renderCharts(data);
-        } catch (e) {}
+    function reportQuery() {
+        const params = new URLSearchParams();
+        if (reportStart.value) params.set('fecha_inicio', reportStart.value);
+        if (reportEnd.value) params.set('fecha_fin', reportEnd.value);
+        return params.toString();
+    }
+
+    async function fetchReport() {
+        const response = await adminFetch(`/reports?${reportQuery()}`);
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.errors ? Object.values(data.errors).flat()[0] : 'No se pudo generar el reporte.');
+        }
+        reportData = await response.json();
+        reportStart.value = reportData.period.start;
+        reportEnd.value = reportData.period.end;
+        renderReport();
     }
 
     async function fetchCategories() {
@@ -329,23 +351,33 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshAllData();
     });
 
-    function renderCharts(data) {
-        if (typeof Chart === 'undefined') return;
+    function renderReport() {
+        if (!reportData) return;
+        reportTotalSales.textContent = `$${reportData.summary.total_sales}`;
+        reportOrderCount.textContent = reportData.summary.order_count;
+        reportAverageTicket.textContent = `$${reportData.summary.average_ticket}`;
+        reportEmptyMessage.style.display = reportData.daily_sales.length === 0 && reportData.summary.order_count === 0 ? 'block' : 'none';
 
-        // Chart 1: Sales Trend
-        const ctxTrend = document.getElementById('chart-sales-trend');
-        if (ctxTrend) {
-            const labels = (data.salesTrend || []).map(s => s.label);
-            const values = (data.salesTrend || []).map(s => s.total);
+        reportTopProducts.innerHTML = reportData.top_products.length
+            ? reportData.top_products.map(product => `<tr><td>${escapeHtml(product.nombre)}</td><td>${product.cantidad}</td><td>$${product.total}</td></tr>`).join('')
+            : '<tr><td colspan="3">Sin productos vendidos en este periodo.</td></tr>';
+        reportOrderStatus.innerHTML = reportData.orders_by_status.length
+            ? reportData.orders_by_status.map(item => `<tr><td>${escapeHtml(item.status)}</td><td>${item.count}</td></tr>`).join('')
+            : '<tr><td colspan="2">Sin pedidos en este periodo.</td></tr>';
+        reportLowInventory.innerHTML = reportData.low_inventory.length
+            ? reportData.low_inventory.map(product => `<tr><td>${product.codigo}</td><td>${escapeHtml(product.nombre)}</td><td>${product.existencia}</td></tr>`).join('')
+            : '<tr><td colspan="3">No hay productos con poco inventario.</td></tr>';
 
-            if (chartSalesTrend) chartSalesTrend.destroy();
-            chartSalesTrend = new Chart(ctxTrend, {
+        const canvas = document.getElementById('chart-daily-sales');
+        if (typeof Chart !== 'undefined' && canvas) {
+            if (chartDailySales) chartDailySales.destroy();
+            chartDailySales = new Chart(canvas, {
                 type: 'line',
                 data: {
-                    labels: labels,
+                    labels: reportData.daily_sales.map(item => item.date),
                     datasets: [{
-                        label: 'Monto ($)',
-                        data: values,
+                        label: 'Ventas ($)',
+                        data: reportData.daily_sales.map(item => item.total),
                         borderColor: '#d97706',
                         backgroundColor: 'rgba(217, 119, 6, 0.2)',
                         fill: true,
@@ -355,45 +387,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 options: { responsive: true, maintainAspectRatio: false }
             });
         }
-
-        // Chart 2: Top Products
-        const ctxTop = document.getElementById('chart-top-products');
-        if (ctxTop) {
-            if (chartTopProducts) chartTopProducts.destroy();
-            chartTopProducts = new Chart(ctxTop, {
-                type: 'doughnut',
-                data: {
-                    labels: data.topProducts?.labels || [],
-                    datasets: [{
-                        data: data.topProducts?.data || [],
-                        backgroundColor: ['#d97706', '#10b981', '#6366f1', '#f59e0b', '#06b6d4']
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-        }
-
-        // Chart 3: Payment Methods
-        const ctxPay = document.getElementById('chart-payment-methods');
-        if (ctxPay) {
-            const payKeys = Object.keys(data.paymentBreakdown || {});
-            const payVals = Object.values(data.paymentBreakdown || {});
-
-            if (chartPaymentMethods) chartPaymentMethods.destroy();
-            chartPaymentMethods = new Chart(ctxPay, {
-                type: 'bar',
-                data: {
-                    labels: payKeys,
-                    datasets: [{
-                        label: 'Ingresos ($)',
-                        data: payVals,
-                        backgroundColor: ['#10b981', '#6366f1', '#f59e0b']
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-        }
     }
+
+    reportFilterForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        try {
+            await fetchReport();
+            logToTerminal('Éxito: Reporte actualizado.');
+        } catch (error) {
+            logToTerminal(`Error: ${error.message}`);
+        }
+    });
+
+    async function downloadReport(type) {
+        const response = await adminFetch(`/reports/exports/${type}?${reportQuery()}`);
+        if (!response.ok) {
+            logToTerminal(`Error: ${await responseError(response, 'No se pudo exportar el reporte.')}`);
+            return;
+        }
+        const blobUrl = URL.createObjectURL(await response.blob());
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const filename = disposition.match(/filename="([^"]+)"/)?.[1] || `${type}.csv`;
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(blobUrl);
+        logToTerminal(`Éxito: Exportación ${filename} generada.`);
+    }
+
+    exportSalesButton.addEventListener('click', () => downloadReport('sales'));
+    exportOrdersButton.addEventListener('click', () => downloadReport('orders'));
 
     async function setOrderStatus(id, estado) {
         try {
