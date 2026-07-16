@@ -144,6 +144,10 @@ php artisan test
 
 La suite cubre seguridad 401/403, permisos, KDS, tracking, CRUD administrativo, inventario, precisión decimal y compatibilidad de migración. El workflow `.github/workflows/laravel.yml` ejecuta la suite con PostgreSQL en CI.
 
+## Despliegue académico en Render
+
+La demostración remota utiliza SQLite efímera. Render puede reiniciar o reemplazar el sistema de archivos y, por tanto, restablecer la base; al iniciar el contenedor, las migraciones y los datos ficticios se regeneran automáticamente. Como el servicio académico puede entrar en inactividad, el primer acceso posterior puede tardar mientras el contenedor vuelve a iniciar.
+
 ## Guion breve de presentación
 
 1. Ejecutar `php artisan migrate:fresh --seed` y `php artisan serve`.

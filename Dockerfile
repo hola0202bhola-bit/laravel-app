@@ -27,6 +27,10 @@ WORKDIR /var/www/html
 # Copy project files
 COPY . .
 
+# Install the academic deployment entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Set correct permissions for Laravel directories
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/database \
     && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/database
@@ -37,5 +41,5 @@ RUN composer install --no-dev --optimize-autoloader
 # Expose port
 EXPOSE 80
 
-# Start apache
-CMD ["apache2-foreground"]
+# Prepare the ephemeral demo database, then start Apache
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
