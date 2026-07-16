@@ -136,6 +136,35 @@
                     </div>
                 </div>
 
+                <!-- ESTADO DE MI PEDIDO (SECCIÓN VISIBLE) -->
+                <div class="actions-container glass-card" id="tracking-panel" style="display: none; margin-bottom: 15px;">
+                    <div class="checkout-header" style="justify-content: space-between; align-items: center; display: flex;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="package" style="color: var(--primary);"></i>
+                            <h3 style="margin: 0;">Estado de mi Pedido</h3>
+                        </div>
+                        <button type="button" id="close-tracking-btn" style="background: none; border: none; color: var(--text-muted); font-size: 1.25rem; cursor: pointer; padding: 0 5px;">&times;</button>
+                    </div>
+                    <div style="padding: 15px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span>Pedido ID: <strong id="tracking-order-id" style="color: white;">-</strong></span>
+                            <span id="tracking-order-status" style="padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.8rem; text-transform: uppercase;">-</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+                            Última actualización: <span id="tracking-last-updated" style="color: white;">-</span>
+                        </div>
+                        <div class="progress-bar-container" style="background: rgba(255,255,255,0.05); height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 15px;">
+                            <div id="tracking-progress-bar" style="background: var(--primary); width: 0%; height: 100%; transition: width 0.4s ease;"></div>
+                        </div>
+                        <div id="tracking-items-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 150px; overflow-y: auto;">
+                            <!-- Items status dynamic rendering -->
+                        </div>
+                        <div id="tracking-error-alert" style="display: none; background: rgba(239, 68, 68, 0.1); border: 1px solid var(--danger); color: var(--danger); padding: 8px; border-radius: 4px; margin-top: 10px; font-size: 0.8rem; text-align: center;">
+                            <i data-lucide="wifi-off" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;"></i> Sin conexión — Reintentando...
+                        </div>
+                    </div>
+                </div>
+
                 <!-- TERMINAL LOG / ORDER RECEIPT DISPLAY -->
                 <div class="terminal-container glass-card">
                     <div class="terminal-header">

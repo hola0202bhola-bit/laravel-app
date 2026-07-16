@@ -84,6 +84,9 @@ class OrderController extends Controller
         // Save Order
         $order = Order::create([
             'estado' => 'pendiente',
+            'estado_preparacion' => 'pendiente',
+            'tracking_token' => \Illuminate\Support\Str::uuid()->toString(),
+            'lock_version' => 0,
             'tipo_pedido' => $tipoPedido,
             'numero_mesa' => $tipoPedido === 'mesa' ? ($request->input('numeroMesa') ?? 'Mesa 1') : null,
             'codigo_delivery' => $codigoDelivery,
@@ -104,6 +107,8 @@ class OrderController extends Controller
                 'id' => $order->id,
                 'fecha' => $order->created_at->toISOString(),
                 'estado' => $order->estado,
+                'estado_preparacion' => $order->estado_preparacion,
+                'tracking_token' => $order->tracking_token, // Returned once on checkout only
                 'tipoPedido' => $order->tipo_pedido,
                 'numeroMesa' => $order->numero_mesa,
                 'codigoDelivery' => $order->codigo_delivery,
@@ -116,14 +121,16 @@ class OrderController extends Controller
 
     public function updateStatus(Request $request)
     {
-        $id = $request->input('id');
-        $estado = $request->input('estado');
+        $validated = $request->validate([
+            'id' => 'required|integer',
+            'estado' => 'required|string|in:pendiente,en_preparacion,listo,entregado,cancelado,rechazado'
+        ]);
 
-        $order = Order::findOrFail($id);
-        $order->update(['estado' => $estado]);
+        $order = Order::findOrFail($validated['id']);
+        $order->update(['estado' => $validated['estado']]);
 
         return response()->json([
-            'message' => "Éxito: El pedido #{$order->id} ha sido {$estado}.",
+            'message' => "Éxito: El pedido #{$order->id} ha sido {$validated['estado']}.",
             'pedido' => $order
         ]);
     }

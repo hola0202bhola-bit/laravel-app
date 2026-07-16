@@ -194,9 +194,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function setOrderStatus(id, estado) {
         try {
+            const token = sessionStorage.getItem('kds_token');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+
             const res = await fetch('/api/pedidos/estado', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: headers,
                 body: JSON.stringify({ id, estado })
             });
 
@@ -205,7 +209,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 logToTerminal(data.message);
                 refreshAllData();
             } else {
-                logToTerminal(data.error || 'Error al cambiar estado.');
+                if (res.status === 401 || res.status === 403) {
+                    logToTerminal('Error: No autorizado. Debe iniciar sesión como Administrador o Gerente en la Pantalla de Cocina.');
+                } else {
+                    logToTerminal(data.error || 'Error al cambiar estado.');
+                }
             }
         } catch (e) {
             logToTerminal('Error de conexión.');

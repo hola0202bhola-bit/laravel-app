@@ -31,12 +31,40 @@
                 <a href="/empleado" class="btn-secondary" style="text-decoration:none; margin-right: 12px;">
                     <i data-lucide="arrow-left"></i> Volver a Admin
                 </a>
+                <button type="button" class="btn-secondary" id="kds-logout-btn" style="margin-right: 12px; display: none; border-color: rgba(239, 68, 68, 0.4); color: #ef4444;">
+                    <i data-lucide="log-out"></i> Cerrar Sesión
+                </button>
                 <div class="live-status-badge">
                     <span class="status-dot pulsing"></span>
                     <span>Sistema de Cocina Activo</span>
                 </div>
             </div>
         </header>
+
+        <!-- LOGIN MODAL FOR KDS -->
+        <div class="modal-overlay" id="kds-login-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center;">
+            <div class="modal-card glass-card" style="width: 350px; padding: 25px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: #111827; color: white;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="background: rgba(245, 158, 11, 0.1); width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px auto;">
+                        <i data-lucide="chef-hat" style="width: 32px; height: 32px; color: #f59e0b;"></i>
+                    </div>
+                    <h3 style="margin: 0; font-size: 1.25rem;">Autenticación KDS</h3>
+                    <p style="margin: 5px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">Acceso exclusivo para empleados autorizados</p>
+                </div>
+                <form id="kds-login-form">
+                    <div class="form-group" style="margin-bottom: 15px; text-align: left;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; color: var(--text-muted);">Correo Electrónico</label>
+                        <input type="email" id="kds-email" required style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; box-sizing: border-box;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 20px; text-align: left;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; color: var(--text-muted);">Contraseña</label>
+                        <input type="password" id="kds-password" required style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; box-sizing: border-box;">
+                    </div>
+                    <div id="kds-login-error" style="display: none; color: #ef4444; font-size: 0.8rem; margin-bottom: 15px; text-align: center;"></div>
+                    <button type="submit" class="btn-primary" style="width: 100%; padding: 10px; border-radius: 4px; border: none; background: #f59e0b; color: #111827; font-weight: 700; cursor: pointer;">Iniciar Sesión</button>
+                </form>
+            </div>
+        </div>
 
         <!-- KANBAN BOARD -->
         <div class="kds-kanban-board">

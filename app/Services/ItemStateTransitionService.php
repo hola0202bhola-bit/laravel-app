@@ -1,24 +1,47 @@
 <?php
 
-namespace App\Models;
+namespace App\Services;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
-class Order extends Model
+class ItemStateTransitionService
 {
-    use HasFactory;
-
-    protected $guarded = [];
-
-    protected $casts = [
-        'items' => 'array',
-        'total' => 'float'
+    public const ALLOWED_TRANSITIONS = [
+        'pendiente' => ['en_preparacion', 'cancelado'],
+        'en_preparacion' => ['listo', 'cancelado'],
+        'listo' => [],
+        'cancelado' => [],
     ];
 
-    public function recalculatePreparationStatus(): string
+    public const MANAGER_TRANSITIONS = [
+        'listo' => ['en_preparacion'],
+    ];
+
+    public static function isAllowed(string $from, string $to, bool $isManager = false): bool
     {
-        $items = $this->items ?? [];
+        if (in_array($to, self::ALLOWED_TRANSITIONS[$from] ?? [])) {
+            return true;
+        }
+
+        if ($isManager && in_array($to, self::MANAGER_TRANSITIONS[$from] ?? [])) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static function validate(string $from, string $to, bool $isManager = false): void
+    {
+        if (!self::isAllowed($from, $to, $isManager)) {
+            throw new HttpException(
+                422,
+                "Transición de estado inválida de '{$from}' a '{$to}'."
+            );
+        }
+    }
+
+    public static function recalculatePreparationStatus(array $items): string
+    {
         if (empty($items)) {
             return 'pendiente';
         }

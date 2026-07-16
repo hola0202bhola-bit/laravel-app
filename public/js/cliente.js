@@ -3,8 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let cart = [];
     let currentProduct = null;
     let selectedQuantity = 1;
-    let lastOrderId = null;
-    let orderTrackingInterval = null;
+    let trackingInterval = null;
+    let trackingAbortController = null;
 
     let activeTag = '';
     let activeAllergen = '';
@@ -520,12 +520,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateCartUI();
                 checkoutModal.classList.remove('active');
 
-                // Start tracking order items status
-                if (data.pedido && data.pedido.id) {
-                    lastOrderId = data.pedido.id;
-                    if (orderTrackingInterval) clearInterval(orderTrackingInterval);
-                    orderTrackingInterval = setInterval(trackOrderProgress, 5000);
-                    trackOrderProgress();
+                // Start tracking order status using secure tracking_token
+                if (data.pedido && data.pedido.tracking_token) {
+                    sessionStorage.setItem('tracking_token', data.pedido.tracking_token);
+                    startTracking();
                 }
             } else {
                 logToTerminal(data.error || 'Error al enviar pedido.');
@@ -533,24 +531,161 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) { logToTerminal('Error de conexión al enviar pedido.'); }
     });
 
-    async function trackOrderProgress() {
-        if (!lastOrderId) return;
-        try {
-            const res = await fetch(`/api/pedidos?t=` + Date.now());
-            const ordersList = await res.json();
-            const myOrder = ordersList.find(o => o.id === lastOrderId);
-            if (myOrder) {
-                const itemsStatus = myOrder.items.map(i => `[${i.nombre}: ${(i.estado || 'pendiente').toUpperCase()}]`).join(' ');
-                logToTerminal(`Avance del Pedido #${myOrder.id}: ${myOrder.estado.toUpperCase()} | ${itemsStatus}`);
-                
-                if (myOrder.estado === 'listo' || myOrder.estado === 'entregado' || myOrder.estado === 'cancelado' || myOrder.estado === 'rechazado') {
-                    clearInterval(orderTrackingInterval);
-                    orderTrackingInterval = null;
-                    lastOrderId = null;
-                }
-            }
-        } catch (e) {}
+    // Close tracking panel manually
+    const trackingPanel = document.getElementById('tracking-panel');
+    const closeTrackingBtn = document.getElementById('close-tracking-btn');
+    const trackingOrderId = document.getElementById('tracking-order-id');
+    const trackingOrderStatus = document.getElementById('tracking-order-status');
+    const trackingLastUpdated = document.getElementById('tracking-last-updated');
+    const trackingProgressBar = document.getElementById('tracking-progress-bar');
+    const trackingItemsList = document.getElementById('tracking-items-list');
+    const trackingErrorAlert = document.getElementById('tracking-error-alert');
+
+    if (closeTrackingBtn) {
+        closeTrackingBtn.addEventListener('click', stopTrackingAndClear);
     }
+
+    function startTracking() {
+        const token = sessionStorage.getItem('tracking_token');
+        if (!token) return;
+
+        if (trackingInterval) clearInterval(trackingInterval);
+        trackOrderProgress();
+        trackingInterval = setInterval(trackOrderProgress, 5000);
+    }
+
+    function stopTrackingAndClear() {
+        if (trackingInterval) {
+            clearInterval(trackingInterval);
+            trackingInterval = null;
+        }
+        if (trackingAbortController) {
+            trackingAbortController.abort();
+            trackingAbortController = null;
+        }
+        sessionStorage.removeItem('tracking_token');
+        if (trackingPanel) {
+            trackingPanel.style.display = 'none';
+        }
+    }
+
+    async function trackOrderProgress() {
+        const token = sessionStorage.getItem('tracking_token');
+        if (!token) return;
+
+        if (trackingAbortController) {
+            trackingAbortController.abort();
+        }
+        trackingAbortController = new AbortController();
+
+        try {
+            const res = await fetch('/api/pedidos/seguimiento', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tracking-Token': token
+                },
+                signal: trackingAbortController.signal
+            });
+
+            if (res.status === 404) {
+                // Token invalid or expired
+                stopTrackingAndClear();
+                return;
+            }
+
+            if (!res.ok) {
+                throw new Error('Error al consultar seguimiento.');
+            }
+
+            const data = await res.json();
+            if (trackingErrorAlert) trackingErrorAlert.style.display = 'none';
+
+            // Render tracking info in UI
+            if (trackingPanel) trackingPanel.style.display = 'block';
+            if (trackingOrderId) trackingOrderId.innerText = `#${data.pedido_id}`;
+            
+            if (trackingOrderStatus) {
+                trackingOrderStatus.innerText = data.estado_preparacion;
+                let bg = 'var(--text-muted)';
+                let color = 'white';
+                if (data.estado_preparacion === 'pendiente') { bg = '#ef4444'; }
+                else if (data.estado_preparacion === 'en_preparacion') { bg = '#f59e0b'; color = '#111827'; }
+                else if (data.estado_preparacion === 'listo') { bg = '#10b981'; }
+                trackingOrderStatus.style.background = bg;
+                trackingOrderStatus.style.color = color;
+            }
+
+            if (trackingLastUpdated) trackingLastUpdated.innerText = data.actualizado_hace;
+
+            // Progress calculation
+            const items = data.items || [];
+            if (items.length > 0) {
+                const total = items.length;
+                const completed = items.filter(i => i.estado === 'listo' || i.estado === 'cancelado').length;
+                const percentage = (completed / total) * 100;
+                if (trackingProgressBar) trackingProgressBar.style.width = `${percentage}%`;
+            }
+
+            // Render item list
+            if (trackingItemsList) {
+                trackingItemsList.innerHTML = '';
+                items.forEach(item => {
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.justifyContent = 'space-between';
+                    row.style.alignItems = 'center';
+                    row.style.fontSize = '0.85rem';
+
+                    const isCancelled = item.estado === 'cancelado';
+                    const textSpan = document.createElement('span');
+                    textSpan.style.color = isCancelled ? 'var(--text-muted)' : 'white';
+                    textSpan.style.textDecoration = isCancelled ? 'line-through' : 'none';
+                    textSpan.innerText = `${item.nombre} (${item.tamano}) x${item.cantidad}`;
+
+                    const badge = document.createElement('span');
+                    badge.style.fontSize = '0.7rem';
+                    badge.style.fontWeight = '700';
+                    badge.style.padding = '2px 6px';
+                    badge.style.borderRadius = '4px';
+                    badge.style.textTransform = 'uppercase';
+
+                    let badgeColor = 'var(--text-muted)';
+                    let badgeBg = 'rgba(255,255,255,0.05)';
+                    if (item.estado === 'pendiente') { badgeColor = '#ef4444'; }
+                    else if (item.estado === 'en_preparacion') { badgeColor = '#f59e0b'; }
+                    else if (item.estado === 'listo') { badgeColor = '#10b981'; }
+                    badge.style.color = badgeColor;
+                    badge.style.background = badgeBg;
+                    badge.innerText = item.estado;
+
+                    row.appendChild(textSpan);
+                    row.appendChild(badge);
+                    trackingItemsList.appendChild(row);
+                });
+            }
+        } catch (e) {
+            if (e.name !== 'AbortError') {
+                if (trackingErrorAlert) trackingErrorAlert.style.display = 'block';
+                console.error('Error tracking order progress', e);
+            }
+        }
+    }
+
+    // Stop tracking when visibility changes to hidden (tab in background)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            if (trackingInterval) {
+                clearInterval(trackingInterval);
+                trackingInterval = null;
+            }
+        } else {
+            startTracking();
+        }
+    });
+
+    // Check if there is an active tracking token in sessionStorage on load
+    startTracking();
 
     printTicketBtn.addEventListener('click', () => window.print());
     searchInput.addEventListener('input', renderCatalog);

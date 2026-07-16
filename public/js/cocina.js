@@ -9,16 +9,103 @@ document.addEventListener('DOMContentLoaded', () => {
     const countPreparacion = document.getElementById('count-preparacion');
     const countListo = document.getElementById('count-listo');
 
+    const kdsLoginModal = document.getElementById('kds-login-modal');
+    const kdsLoginForm = document.getElementById('kds-login-form');
+    const kdsLogoutBtn = document.getElementById('kds-logout-btn');
+    const kdsEmail = document.getElementById('kds-email');
+    const kdsPassword = document.getElementById('kds-password');
+    const kdsLoginError = document.getElementById('kds-login-error');
+
     lucide.createIcons();
 
-    // SSE Connection
-    const evtSource = new EventSource('/api/events');
-    evtSource.addEventListener('nuevo_pedido', () => fetchKitchenOrders());
-    evtSource.addEventListener('pedido_estado_cambiado', () => fetchKitchenOrders());
+    // Check auth session
+    function checkAuth() {
+        const token = sessionStorage.getItem('kds_token');
+        if (!token) {
+            showLoginModal();
+        } else {
+            if (kdsLoginModal) kdsLoginModal.style.display = 'none';
+            if (kdsLogoutBtn) kdsLogoutBtn.style.display = 'inline-flex';
+            fetchKitchenOrders();
+        }
+    }
+
+    function showLoginModal() {
+        if (kdsLoginModal) kdsLoginModal.style.display = 'flex';
+        if (kdsLogoutBtn) kdsLogoutBtn.style.display = 'none';
+        orders = [];
+        renderKanbanBoard();
+    }
+
+    // Login Form Submit
+    if (kdsLoginForm) {
+        kdsLoginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (kdsLoginError) kdsLoginError.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: kdsEmail.value, password: kdsPassword.value })
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || 'Credenciales incorrectas.');
+                }
+
+                sessionStorage.setItem('kds_token', data.token);
+                sessionStorage.setItem('kds_roles', JSON.stringify(data.user.roles));
+                checkAuth();
+            } catch (err) {
+                if (kdsLoginError) {
+                    kdsLoginError.innerText = err.message;
+                    kdsLoginError.style.display = 'block';
+                }
+            }
+        });
+    }
+
+    // Logout Action
+    if (kdsLogoutBtn) {
+        kdsLogoutBtn.addEventListener('click', async () => {
+            const token = sessionStorage.getItem('kds_token');
+            if (token) {
+                try {
+                    await fetch('/api/auth/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + token
+                        }
+                    });
+                } catch (e) {}
+            }
+            sessionStorage.removeItem('kds_token');
+            sessionStorage.removeItem('kds_roles');
+            showLoginModal();
+        });
+    }
 
     async function fetchKitchenOrders() {
+        const token = sessionStorage.getItem('kds_token');
+        if (!token) return;
+
         try {
-            const res = await fetch('/api/cocina/pedidos?t=' + Date.now());
+            const res = await fetch('/api/cocina/pedidos?t=' + Date.now(), {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                }
+            });
+
+            if (res.status === 401 || res.status === 403) {
+                sessionStorage.removeItem('kds_token');
+                showLoginModal();
+                return;
+            }
+
             orders = await res.json();
             renderKanbanBoard();
         } catch (e) {
@@ -27,25 +114,59 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function changeOrderStatus(orderId, nextState) {
+        const token = sessionStorage.getItem('kds_token');
+        if (!token) return;
+
         try {
-            await fetch('/api/cocina/estado', {
+            const res = await fetch('/api/cocina/estado', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
                 body: JSON.stringify({ order_id: orderId, estado: nextState })
             });
+
+            if (res.status === 401 || res.status === 403) {
+                sessionStorage.removeItem('kds_token');
+                showLoginModal();
+                return;
+            }
+
             fetchKitchenOrders();
         } catch (e) {
             console.error('Error updating order state', e);
         }
     }
 
-    async function changeItemStatus(orderId, itemId, nextState) {
+    async function changeItemStatus(orderId, itemId, nextState, motivo = null) {
+        const token = sessionStorage.getItem('kds_token');
+        if (!token) return;
+
         try {
-            await fetch('/api/cocina/items/estado', {
+            const payload = { order_id: orderId, item_id: itemId, estado: nextState };
+            if (motivo) payload.motivo = motivo;
+
+            const res = await fetch('/api/cocina/items/estado', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ order_id: orderId, item_id: itemId, estado: nextState })
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify(payload)
             });
+
+            if (res.status === 401 || res.status === 403) {
+                sessionStorage.removeItem('kds_token');
+                showLoginModal();
+                return;
+            }
+
+            if (res.status === 422 || res.status === 409) {
+                const data = await res.json();
+                alert(data.error || data.message || 'Error al actualizar el estado del producto.');
+            }
+
             fetchKitchenOrders();
         } catch (e) {
             console.error('Error updating item state', e);
@@ -57,9 +178,10 @@ document.addEventListener('DOMContentLoaded', () => {
         cardsPreparacion.innerHTML = '';
         cardsListo.innerHTML = '';
 
-        const pendientes = orders.filter(o => o.estado === 'pendiente');
-        const preparaciones = orders.filter(o => o.estado === 'en_preparacion');
-        const listos = orders.filter(o => o.estado === 'listo' || o.estado === 'entregado');
+        // Filter Kanban columns based on orders.estado_preparacion
+        const pendientes = orders.filter(o => o.estado_preparacion === 'pendiente');
+        const preparaciones = orders.filter(o => o.estado_preparacion === 'en_preparacion');
+        const listos = orders.filter(o => o.estado_preparacion === 'listo');
 
         countPendiente.innerText = pendientes.length;
         countPreparacion.innerText = preparaciones.length;
@@ -114,6 +236,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div style="display:flex; gap:6px; align-items:center;">
                         <button type="button" class="btn-finish-item" data-item-id="${item.id}" style="background-color:#10b981; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:700; cursor:pointer;" title="Listo"><i data-lucide="check" style="width:12px; height:12px;"></i></button>
                         <button type="button" class="btn-cancel-item" data-item-id="${item.id}" style="background-color:#ef4444; color:white; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:700; cursor:pointer;" title="Cancelar"><i data-lucide="x" style="width:12px; height:12px;"></i></button>
+                    </div>
+                `;
+            } else if (statusVal === 'listo') {
+                // Reversal check for listo -> en_preparacion (needs prompt reasoning)
+                actionsHTML = `
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span style="font-size:0.75rem; font-weight:700; padding:2px 6px; border-radius:4px; color:${badgeColor}; background:rgba(255,255,255,0.05); text-transform:uppercase;">${statusVal}</span>
+                        <button type="button" class="btn-revert-item" data-item-id="${item.id}" style="background-color:rgba(255,255,255,0.05); color:#f59e0b; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; cursor:pointer;" title="Revertir a Preparación"><i data-lucide="rotate-ccw" style="width:12px; height:12px;"></i></button>
                     </div>
                 `;
             } else {
@@ -181,7 +311,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (colType === 'pending') {
             card.querySelector('.btn-kds-start').addEventListener('click', () => changeOrderStatus(order.id, 'en_preparacion'));
         } else if (colType === 'prep') {
-            card.querySelector('.btn-kds-finish').addEventListener('click', () => changeOrderStatus(order.id, 'listo'));
+            card.querySelector('.btn-kds-finish').addEventListener('click', () => {
+                if (confirm('¿Está seguro de que desea marcar todos los artículos del pedido como listos?')) {
+                    changeOrderStatus(order.id, 'listo');
+                }
+            });
         }
 
         // Attach individual item action listeners
@@ -194,10 +328,20 @@ document.addEventListener('DOMContentLoaded', () => {
         card.querySelectorAll('.btn-cancel-item').forEach(btn => {
             btn.addEventListener('click', () => changeItemStatus(order.id, btn.getAttribute('data-item-id'), 'cancelado'));
         });
+        card.querySelectorAll('.btn-revert-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const reason = prompt('Ingrese el motivo obligatorio para revertir el producto listo a preparación:');
+                if (reason && reason.trim().length >= 5) {
+                    changeItemStatus(order.id, btn.getAttribute('data-item-id'), 'en_preparacion', reason.trim());
+                } else if (reason !== null) {
+                    alert('El motivo debe tener al menos 5 caracteres.');
+                }
+            });
+        });
 
         return card;
     }
 
-    fetchKitchenOrders();
+    checkAuth();
     setInterval(fetchKitchenOrders, 5000);
 });
