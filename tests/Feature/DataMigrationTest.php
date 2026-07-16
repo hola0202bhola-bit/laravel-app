@@ -66,6 +66,11 @@ class DataMigrationTest extends TestCase
                 $table->timestamp('finished_at')->nullable();
                 $table->string('status')->default('pending');
                 $table->json('options')->nullable();
+                $table->string('source_checksum')->nullable();
+                $table->bigInteger('source_size')->nullable();
+                $table->string('target_fingerprint')->nullable();
+                $table->string('manifest_version')->nullable();
+                $table->string('code_commit')->nullable();
                 $table->timestamps();
             },
             'data_migration_checkpoints' => function ($table) {
@@ -83,26 +88,28 @@ class DataMigrationTest extends TestCase
                 $table->timestamps();
             },
             'roles' => function ($table) { $table->id(); },
-            'categories' => function ($table) { $table->id(); },
+            'categories' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
             'allergens' => function ($table) { $table->id(); },
             'dietary_tags' => function ($table) { $table->id(); },
-            'ingredients' => function ($table) { $table->id(); },
+            'ingredients' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
             'suppliers' => function ($table) { $table->id(); },
-            'extra_ingredients' => function ($table) { $table->id(); },
-            'custom_bases' => function ($table) { $table->id(); },
-            'custom_options' => function ($table) { $table->id(); },
-            'dining_tables' => function ($table) { $table->id(); },
-            'order_statuses' => function ($table) { $table->id(); },
-            'delivery_providers' => function ($table) { $table->id(); },
-            'payment_methods' => function ($table) { $table->id(); },
+            'extra_ingredients' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
+            'custom_bases' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
+            'custom_options' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
+            'dining_tables' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
+            'order_statuses' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
+            'delivery_providers' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
+            'payment_methods' => function ($table) { $table->id(); $table->boolean('activo')->default(true); },
             'products' => function ($table) {
                 $table->id();
                 $table->integer('codigo')->unique();
                 $table->decimal('precio', 8, 2);
                 $table->json('extras')->nullable();
+                $table->boolean('activo')->default(true);
                 $table->timestamps();
             },
             'sales' => function ($table) { $table->id(); },
+            'failed_jobs' => function ($table) { $table->id(); },
             'user_roles' => function ($table) { $table->id(); },
             'product_allergens' => function ($table) { $table->id(); },
             'product_dietary_tags' => function ($table) { $table->id(); },
@@ -120,6 +127,7 @@ class DataMigrationTest extends TestCase
             },
             'custom_item_details' => function ($table) { $table->id(); },
             'order_status_histories' => function ($table) { $table->id(); },
+            'personal_access_tokens' => function ($table) { $table->id(); },
             'sale_details' => function ($table) { $table->id(); },
             'inventory_logs' => function ($table) { $table->id(); },
             'order_item_extras' => function ($table) { $table->id(); }
@@ -218,28 +226,70 @@ class DataMigrationTest extends TestCase
         $this->assertEquals(2, $checkpoint->last_migrated_id);
         $this->assertEquals(2, $checkpoint->rows_copied);
 
-        // Set run status to failed to simulate interruption
-        DB::connection('migration_target')->table('data_migration_runs')->where('id', $checkpoint->run_id)->update(['status' => 'failed']);
-        // Set users checkpoint status to processing so it continues migrating users
-        DB::connection('migration_target')->table('data_migration_checkpoints')
-            ->where('run_id', $checkpoint->run_id)
-            ->where('table_name', 'users')
-            ->update(['status' => 'processing']);
-        
-        // Seed another record in source
-        DB::connection('migration_source')->table('users')->insert(['id' => 3, 'name' => 'Charlie']);
+        $runId = $checkpoint->run_id;
 
+        // Set run status to failed to simulate interruption
+        DB::connection('migration_target')->table('data_migration_runs')->where('id', $runId)->update(['status' => 'failed']);
+        
+        // Clear products in target to verify it gets re-migrated on resume
+        DB::connection('migration_target')->table('products')->truncate();
+        
+        // Reset products checkpoint to processing
+        DB::connection('migration_target')->table('data_migration_checkpoints')
+            ->where('run_id', $runId)
+            ->where('table_name', 'products')
+            ->update(['status' => 'processing', 'last_migrated_id' => 0, 'rows_copied' => 0]);
+
+        // Resume using the run ID (source checksum is identical since we didn't write to source)
         $exitCode2 = $this->artisan('db:migrate-to-pgsql', [
             '--source' => 'migration_source',
             '--target' => 'migration_target',
             '--resume' => true,
+            '--run-id' => $runId,
             '--force' => true
         ])->run();
 
         $this->assertEquals(0, $exitCode2);
         
-        // Check that Charlie got migrated and no duplicates for Alice/Bob
-        $this->assertEquals(3, DB::connection('migration_target')->table('users')->count());
+        // Check that products got migrated again
+        $this->assertEquals(1, DB::connection('migration_target')->table('products')->count());
+    }
+
+    public function test_resume_aborts_if_source_database_changed()
+    {
+        // Seed source
+        DB::connection('migration_source')->table('users')->insert([
+            ['id' => 1, 'name' => 'Alice']
+        ]);
+
+        // First Run
+        $exitCode1 = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true
+        ])->run();
+
+        $this->assertEquals(0, $exitCode1);
+
+        $runId = DB::connection('migration_target')->table('data_migration_runs')->value('id');
+        $this->assertNotNull($runId);
+
+        // Mark run as failed to allow resume
+        DB::connection('migration_target')->table('data_migration_runs')->where('id', $runId)->update(['status' => 'failed']);
+
+        // Modify source database to change its checksum
+        DB::connection('migration_source')->table('users')->insert(['id' => 2, 'name' => 'Charlie']);
+
+        // Resume should abort (exit code 1) because source checksum changed
+        $exitCode2 = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--resume' => true,
+            '--run-id' => $runId,
+            '--force' => true
+        ])->run();
+
+        $this->assertEquals(1, $exitCode2);
     }
 
     public function test_migration_verifies_checksums_correctly()
@@ -252,7 +302,7 @@ class DataMigrationTest extends TestCase
             ['id' => 1, 'codigo' => 101, 'precio' => 15.50, 'extras' => json_encode(['sugar' => true])]
         ]);
 
-        // Run only verification phase
+        // Run only verification phase (requires preflight schema validation passing)
         $exitCode = $this->artisan('db:migrate-to-pgsql', [
             '--source' => 'migration_source',
             '--target' => 'migration_target',
@@ -332,5 +382,66 @@ class DataMigrationTest extends TestCase
         $this->expectExceptionMessageMatches('/attempt to write a readonly database|readonly/i');
 
         DB::connection('migration_source')->table('users')->insert(['id' => 99, 'name' => 'Should Fail']);
+    }
+
+    public function test_read_only_end_to_end_on_physical_sqlite_file()
+    {
+        DB::connection('migration_source')->table('users')->insert([
+            ['id' => 1, 'name' => 'Alice'],
+            ['id' => 2, 'name' => 'Bob']
+        ]);
+
+        $checksumBefore = hash_file('sha256', $this->tempSourceFile);
+        $originalOptions = config('database.connections.migration_source.options', []);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--source-file' => $this->tempSourceFile,
+            '--force' => true
+        ])->run();
+
+        $this->assertEquals(0, $exitCode);
+
+        $checksumAfter = hash_file('sha256', $this->tempSourceFile);
+        $this->assertEquals($checksumBefore, $checksumAfter);
+        $this->assertEquals($originalOptions, config('database.connections.migration_source.options'));
+    }
+
+    public function test_source_options_restored_on_exception()
+    {
+        Schema::connection('migration_target')->drop('users');
+        $originalOptions = config('database.connections.migration_source.options', []);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true
+        ])->run();
+
+        $this->assertEquals(1, $exitCode);
+        $this->assertEquals($originalOptions, config('database.connections.migration_source.options'));
+    }
+
+    public function test_boolean_migration_mapping()
+    {
+        DB::connection('migration_source')->table('categories')->insert([
+            ['id' => 1, 'activo' => 1],
+            ['id' => 2, 'activo' => 0]
+        ]);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true
+        ])->run();
+
+        $this->assertEquals(0, $exitCode);
+
+        $cat1 = DB::connection('migration_target')->table('categories')->where('id', 1)->first();
+        $cat2 = DB::connection('migration_target')->table('categories')->where('id', 2)->first();
+
+        $this->assertTrue((bool)$cat1->activo);
+        $this->assertFalse((bool)$cat2->activo);
     }
 }

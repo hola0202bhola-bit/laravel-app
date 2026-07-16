@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, feature/migrate-to-postgresql, fix/kds-item-status-hardening ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, fix/kds-item-status-hardening ]
 
 jobs:
   laravel-tests:
@@ -26,7 +26,7 @@ jobs:
           --health-retries 5
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Setup PHP
       uses: shivammathur/setup-php@v2

@@ -17,6 +17,11 @@ return new class extends Migration
             $table->timestamp('finished_at')->nullable();
             $table->string('status')->default('pending'); // pending, failed, success
             $table->json('options')->nullable();
+            $table->string('source_checksum')->nullable();
+            $table->bigInteger('source_size')->nullable();
+            $table->string('target_fingerprint')->nullable();
+            $table->string('manifest_version')->nullable();
+            $table->string('code_commit')->nullable();
             $table->timestamps();
         });
 

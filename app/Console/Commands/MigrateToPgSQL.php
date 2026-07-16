@@ -157,12 +157,10 @@ class MigrateToPgSQL extends Command
                 return 1;
             }
 
-            // Run Preflight Validation Check before importing
-            if (!$verifyOnly) {
-                $preflight = $this->runPreflightValidation($sourceConn, $targetConn, $allowOrphans);
-                if (!$preflight) {
-                    return 1;
-                }
+            // Run Preflight Validation Check
+            $preflight = $this->runPreflightValidation($sourceConn, $targetConn, $allowOrphans);
+            if (!$preflight) {
+                return 1;
             }
 
             if ($verifyOnly) {
@@ -176,15 +174,48 @@ class MigrateToPgSQL extends Command
             $checkpoints = [];
 
             if ($resume) {
-                $queryRun = DB::connection($targetConn)->table('data_migration_runs');
-                if ($runIdOpt) {
-                    $lastRun = $queryRun->where('id', $runIdOpt)->first();
-                } else {
-                    $lastRun = $queryRun->whereIn('status', ['pending', 'failed'])->orderBy('id', 'desc')->first();
+                if (!$runIdOpt) {
+                    $this->error("Safety violation: The --run-id option is strictly required when using --resume.");
+                    return 1;
                 }
 
+                $lastRun = DB::connection($targetConn)->table('data_migration_runs')
+                    ->where('id', $runIdOpt)
+                    ->first();
+
                 if (!$lastRun) {
-                    $this->error("No failed or pending migration run found to resume.");
+                    $this->error("No migration run found with ID: {$runIdOpt}");
+                    return 1;
+                }
+
+                if ($lastRun->status !== 'pending' && $lastRun->status !== 'failed') {
+                    $this->error("Migration run ID {$runIdOpt} is not in a resumeable state (current status: {$lastRun->status}).");
+                    return 1;
+                }
+
+                // Gather current database metadata
+                $currentSourceChecksum = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? hash_file('sha256', $sourceDbPath) : 'in-memory-checksum';
+                $currentTargetFingerprint = hash('sha256', $targetConn . '-' . config("database.connections.{$targetConn}.database"));
+
+                // Verify source and target integrity
+                if ($lastRun->source_checksum !== $currentSourceChecksum) {
+                    $this->error("Abort resume: Source SQLite database file checksum has changed since the migration started.");
+                    return 1;
+                }
+
+                if ($lastRun->target_fingerprint !== $currentTargetFingerprint) {
+                    $this->error("Abort resume: Target database fingerprint has changed since the migration started.");
+                    return 1;
+                }
+
+                // Verify options match
+                $currentOptions = json_encode([
+                    'batch_size' => $batchSize,
+                    'allow_orphans' => $allowOrphans
+                ], JSON_THROW_ON_ERROR);
+
+                if ($lastRun->options !== $currentOptions) {
+                    $this->error("Abort resume: Migration run options do not match original options.");
                     return 1;
                 }
 
@@ -208,6 +239,12 @@ class MigrateToPgSQL extends Command
                     return 0;
                 }
 
+                // Gather metadata for new run
+                $sourceChecksum = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? hash_file('sha256', $sourceDbPath) : 'in-memory-checksum';
+                $sourceSize = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? filesize($sourceDbPath) : 0;
+                $targetFingerprint = hash('sha256', $targetConn . '-' . config("database.connections.{$targetConn}.database"));
+                $codeCommit = trim(@shell_exec('git rev-parse HEAD')) ?: 'unknown';
+
                 if (!$dryRun) {
                     $runId = DB::connection($targetConn)->table('data_migration_runs')->insertGetId([
                         'started_at' => now(),
@@ -215,7 +252,14 @@ class MigrateToPgSQL extends Command
                         'options' => json_encode([
                             'batch_size' => $batchSize,
                             'allow_orphans' => $allowOrphans
-                        ], JSON_THROW_ON_ERROR)
+                        ], JSON_THROW_ON_ERROR),
+                        'source_checksum' => $sourceChecksum,
+                        'source_size' => $sourceSize,
+                        'target_fingerprint' => $targetFingerprint,
+                        'manifest_version' => '1.0.0',
+                        'code_commit' => $codeCommit,
+                        'created_at' => now(),
+                        'updated_at' => now()
                     ]);
                     $this->info("Created new migration run ID: {$runId}");
                 }
@@ -359,7 +403,7 @@ class MigrateToPgSQL extends Command
                 $decimalColumns = $this->getDecimalColumns($table);
                 foreach ($decimalColumns as $decCol) {
                     if (isset($record[$decCol]) && is_numeric($record[$decCol])) {
-                        $record[$decCol] = number_format((float)$record[$decCol], 2, '.', '');
+                        $record[$decCol] = $this->normalizeDecimalString($record[$decCol], $this->getDecimalScale($table, $decCol));
                     }
                 }
 
@@ -532,6 +576,8 @@ class MigrateToPgSQL extends Command
 
         foreach ($this->topologicalTables as $table) {
             if (!Schema::connection($sourceConn)->hasTable($table) || !Schema::connection($targetConn)->hasTable($table)) {
+                $this->error("Verification failed: Required table '{$table}' is missing in source or target schema.");
+                $hasErrors = true;
                 continue;
             }
 
@@ -548,9 +594,14 @@ class MigrateToPgSQL extends Command
             }
 
             // Decimal sums verification
-            $sourceSum = '0.00';
-            $targetSum = '0.00';
             $decimalCol = $this->getDecimalColumns($table);
+            $scale = 2;
+            if (!empty($decimalCol)) {
+                $col = $decimalCol[0];
+                $scale = $this->getDecimalScale($table, $col);
+            }
+            $sourceSum = $this->normalizeDecimalString(0, $scale);
+            $targetSum = $this->normalizeDecimalString(0, $scale);
             if (!empty($decimalCol)) {
                 $col = $decimalCol[0];
                 
@@ -558,7 +609,7 @@ class MigrateToPgSQL extends Command
                 $sourceRows = DB::connection($sourceConn)->table($table)->pluck($col);
                 foreach ($sourceRows as $val) {
                     if (is_numeric($val)) {
-                        $sourceSum = bcadd($sourceSum, number_format((float)$val, 2, '.', ''), 2);
+                        $sourceSum = bcadd($sourceSum, $this->normalizeDecimalString($val, $scale), $scale);
                     }
                 }
 
@@ -566,7 +617,7 @@ class MigrateToPgSQL extends Command
                 $targetRows = DB::connection($targetConn)->table($table)->pluck($col);
                 foreach ($targetRows as $val) {
                     if (is_numeric($val)) {
-                        $targetSum = bcadd($targetSum, number_format((float)$val, 2, '.', ''), 2);
+                        $targetSum = bcadd($targetSum, $this->normalizeDecimalString($val, $scale), $scale);
                     }
                 }
             }
@@ -772,12 +823,6 @@ class MigrateToPgSQL extends Command
         return $map[$table] ?? [];
     }
 
-    private function getBooleanColumns($table): array
-    {
-        // Add potential boolean columns map if defined in the schema
-        return [];
-    }
-
     private function getDecimalColumns($table): array
     {
         $map = [
@@ -807,5 +852,36 @@ class MigrateToPgSQL extends Command
             'products' => ['imagen', 'descripcion']
         ];
         return $map[$table] ?? [];
+    }
+
+    private function getBooleanColumns($table): array
+    {
+        $map = [
+            'categories' => ['activo'],
+            'dining_tables' => ['activo'],
+            'order_statuses' => ['activo'],
+            'payment_methods' => ['activo'],
+            'delivery_providers' => ['activo'],
+            'products' => ['activo'],
+            'extra_ingredients' => ['activo'],
+            'custom_bases' => ['activo'],
+            'custom_options' => ['activo'],
+            'ingredients' => ['activo']
+        ];
+        return $map[$table] ?? [];
+    }
+
+    private function getDecimalScale($table, $column): int
+    {
+        return 2;
+    }
+
+    private function normalizeDecimalString($value, int $scale): string
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return bcadd('0', '0', $scale);
+        }
+        return bcadd($value, '0', $scale);
     }
 }
