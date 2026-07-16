@@ -41,6 +41,9 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+            'options' => env('DB_SQLITE_READONLY', false) ? [
+                \PDO::SQLITE_ATTR_OPEN_FLAGS => \PDO::SQLITE_OPEN_READONLY,
+            ] : [],
         ],
 
         'mysql' => [
