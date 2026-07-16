@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class DataMigrationTest extends TestCase
@@ -16,13 +17,15 @@ class DataMigrationTest extends TestCase
 
     protected $tempSourceFile;
     protected $tempTargetFile;
+    protected $targetSchema;
 
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->tempSourceFile = tempnam(sys_get_temp_dir(), 'source_db_');
-        $this->tempTargetFile = tempnam(sys_get_temp_dir(), 'target_db_');
+        $this->tempTargetFile = null;
+        $this->targetSchema = null;
 
         Config::set('database.connections.migration_source', [
             'driver' => 'sqlite',
@@ -30,11 +33,31 @@ class DataMigrationTest extends TestCase
             'prefix' => '',
         ]);
 
-        Config::set('database.connections.migration_target', [
-            'driver' => 'sqlite',
-            'database' => $this->tempTargetFile,
-            'prefix' => '',
-        ]);
+        $defaultConnection = config('database.default');
+        $defaultConfig = config("database.connections.{$defaultConnection}");
+
+        if (($defaultConfig['driver'] ?? null) === 'pgsql') {
+            $this->targetSchema = 'migration_test_' . strtolower(Str::random(12));
+
+            Config::set('database.connections.migration_admin', $defaultConfig);
+            DB::purge('migration_admin');
+            DB::connection('migration_admin')->statement('CREATE SCHEMA "' . $this->targetSchema . '"');
+
+            $targetConfig = $defaultConfig;
+            $targetConfig['search_path'] = $this->targetSchema;
+            Config::set('database.connections.migration_target', $targetConfig);
+        } else {
+            if (filter_var(env('MIGRATION_REQUIRE_PGSQL', false), FILTER_VALIDATE_BOOL)) {
+                $this->fail('MIGRATION_REQUIRE_PGSQL is enabled, but migration_target is not PostgreSQL.');
+            }
+
+            $this->tempTargetFile = tempnam(sys_get_temp_dir(), 'target_db_');
+            Config::set('database.connections.migration_target', [
+                'driver' => 'sqlite',
+                'database' => $this->tempTargetFile,
+                'prefix' => '',
+            ]);
+        }
 
         DB::purge('migration_source');
         DB::purge('migration_target');
@@ -47,6 +70,11 @@ class DataMigrationTest extends TestCase
     {
         DB::disconnect('migration_source');
         DB::disconnect('migration_target');
+
+        if ($this->targetSchema) {
+            DB::connection('migration_admin')->statement('DROP SCHEMA "' . $this->targetSchema . '" CASCADE');
+            DB::disconnect('migration_admin');
+        }
 
         if (file_exists($this->tempSourceFile)) {
             unlink($this->tempSourceFile);
@@ -89,10 +117,7 @@ class DataMigrationTest extends TestCase
                 $table->timestamps();
             },
             'roles' => function ($table) { $table->id(); },
-            'categories' => function ($table) {
-                $table->id();
-                $table->boolean('is_active')->default(true);
-            },
+            'categories' => function ($table) { $table->id(); },
             'allergens' => function ($table) { $table->id(); },
             'dietary_tags' => function ($table) { $table->id(); },
             'ingredients' => function ($table) {
@@ -452,12 +477,11 @@ class DataMigrationTest extends TestCase
         $this->assertEquals($originalOptions, config('database.connections.migration_source.options'));
     }
 
-    public function test_boolean_migration_mapping()
+    public function test_preflight_rejects_unexpected_source_columns_before_writing()
     {
-        DB::connection('migration_source')->table('categories')->insert([
-            ['id' => 1, 'is_active' => 1],
-            ['id' => 2, 'is_active' => 0]
-        ]);
+        Schema::connection('migration_source')->table('categories', function ($table) {
+            $table->boolean('activo')->default(true);
+        });
 
         $exitCode = $this->artisan('db:migrate-to-pgsql', [
             '--source' => 'migration_source',
@@ -465,13 +489,8 @@ class DataMigrationTest extends TestCase
             '--force' => true
         ])->run();
 
-        $this->assertEquals(0, $exitCode);
-
-        $cat1 = DB::connection('migration_target')->table('categories')->where('id', 1)->first();
-        $cat2 = DB::connection('migration_target')->table('categories')->where('id', 2)->first();
-
-        $this->assertTrue((bool)$cat1->is_active);
-        $this->assertFalse((bool)$cat2->is_active);
+        $this->assertEquals(1, $exitCode);
+        $this->assertEquals(0, DB::connection('migration_target')->table('data_migration_runs')->count());
     }
 
     public function test_personal_access_tokens_not_migrated()
@@ -547,6 +566,100 @@ class DataMigrationTest extends TestCase
 
         $this->assertEquals(0, $exitCode);
         $this->assertEquals(0, DB::connection('migration_target')->table('users')->count());
+    }
+
+    public function test_dry_run_validates_related_data_without_requiring_target_rows()
+    {
+        DB::connection('migration_source')->table('products')->insert([
+            'id' => 1,
+            'codigo' => 101,
+            'precio' => '12.34',
+        ]);
+        DB::connection('migration_source')->table('allergens')->insert(['id' => 1]);
+        DB::connection('migration_source')->table('product_allergens')->insert([
+            'id' => 1,
+            'product_codigo' => 101,
+            'allergen_id' => 1,
+        ]);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--dry-run' => true,
+            '--force' => true,
+        ])->run();
+
+        $this->assertEquals(0, $exitCode);
+        $this->assertEquals(0, DB::connection('migration_target')->table('products')->count());
+        $this->assertEquals(0, DB::connection('migration_target')->table('product_allergens')->count());
+        $this->assertEquals(0, DB::connection('migration_target')->table('data_migration_runs')->count());
+    }
+
+    public function test_run_id_is_rejected_without_resume_before_writing()
+    {
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--run-id' => 1,
+            '--force' => true,
+        ])->run();
+
+        $this->assertEquals(1, $exitCode);
+        $this->assertEquals(0, DB::connection('migration_target')->table('data_migration_runs')->count());
+    }
+
+    public function test_order_domain_strings_are_validated_without_foreign_key_lookups()
+    {
+        DB::connection('migration_source')->table('orders')->insert([
+            'id' => 1,
+            'total' => '10.00',
+            'estado' => 'pendiente',
+            'estado_preparacion' => 'pendiente',
+            'tipo_pedido' => 'delivery',
+            'metodo_pago' => 'delivery',
+        ]);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true,
+        ])->run();
+
+        $this->assertEquals(0, $exitCode);
+        $this->assertEquals('delivery', DB::connection('migration_target')->table('orders')->value('metodo_pago'));
+    }
+
+    public function test_invalid_order_domain_string_aborts_before_writing()
+    {
+        DB::connection('migration_source')->table('orders')->insert([
+            'id' => 1,
+            'total' => '10.00',
+            'estado' => 'pendiente',
+            'estado_preparacion' => 'pendiente',
+            'tipo_pedido' => 'desconocido',
+            'metodo_pago' => 'efectivo',
+        ]);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true,
+        ])->run();
+
+        $this->assertEquals(1, $exitCode);
+        $this->assertEquals(0, DB::connection('migration_target')->table('orders')->count());
+        $this->assertEquals(0, DB::connection('migration_target')->table('data_migration_runs')->count());
+    }
+
+    public function test_ci_migration_target_is_real_postgresql()
+    {
+        if (!filter_var(env('MIGRATION_REQUIRE_PGSQL', false), FILTER_VALIDATE_BOOL)) {
+            $this->assertContains(DB::connection('migration_target')->getDriverName(), ['sqlite', 'pgsql']);
+            return;
+        }
+
+        $this->assertSame('pgsql', DB::connection('migration_target')->getDriverName());
+        $this->assertStringContainsString('PostgreSQL', DB::connection('migration_target')->selectOne('SELECT version() AS version')->version);
     }
 
     public function test_resume_aborts_on_source_size_mismatch()

@@ -81,4 +81,5 @@ jobs:
         DB_DATABASE: laravel_test
         DB_USERNAME: postgres
         DB_PASSWORD: password
+        MIGRATION_REQUIRE_PGSQL: true
       run: php artisan test

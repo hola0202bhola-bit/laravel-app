@@ -110,6 +110,26 @@ class MigrateToPgSQL extends Command
         $allowOrphans = $this->option('allow-orphans');
         $batchSize = intval($this->option('batch-size'));
 
+        if ($resume && !$runIdOpt) {
+            $this->error('Safety violation: The --run-id option is strictly required when using --resume.');
+            return 1;
+        }
+
+        if ($runIdOpt && !$resume) {
+            $this->error('Safety violation: The --run-id option may only be used together with --resume.');
+            return 1;
+        }
+
+        if ($dryRun && $resume) {
+            $this->error('Safety violation: --dry-run cannot be combined with --resume.');
+            return 1;
+        }
+
+        if ($batchSize < 1) {
+            $this->error('The --batch-size option must be a positive integer.');
+            return 1;
+        }
+
         $this->info("=== Starting Cafe Sublime SQLite to PostgreSQL Migration ===");
         $this->info("App Timezone: " . config('app.timezone'));
         $this->info("Source Connection: {$sourceConn}");
@@ -195,11 +215,6 @@ class MigrateToPgSQL extends Command
             $currentCodeCommit = $this->getCodeCommit();
 
             if ($resume) {
-                if (!$runIdOpt) {
-                    $this->error("Safety violation: The --run-id option is strictly required when using --resume.");
-                    return 1;
-                }
-
                 $lastRun = DB::connection($targetConn)->table('data_migration_runs')
                     ->where('id', $runIdOpt)
                     ->first();
@@ -339,7 +354,6 @@ class MigrateToPgSQL extends Command
                 } catch (\Throwable $e) {
                     $errMsg = "Failed migrating table {$table}: " . $e->getMessage();
                     $this->error($errMsg);
-                    file_put_contents(base_path('debug_migration.log'), $errMsg . "\n", FILE_APPEND);
                     $this->markRunFailed($targetConn, $runId, $errMsg);
                     return 1;
                 }
@@ -372,7 +386,6 @@ class MigrateToPgSQL extends Command
         } catch (\Throwable $e) {
             $msg = "Fatal migration error: " . $e->getMessage() . "\n" . $e->getTraceAsString();
             $this->error($msg);
-            file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
             $this->markRunFailed($targetConn, $runId, $e->getMessage());
             return 1;
         } finally {
@@ -433,7 +446,7 @@ class MigrateToPgSQL extends Command
             $query->where('id', '>', $lastMigratedId)->orderBy('id', 'asc');
         }
 
-        $query->chunk($batchSize, function ($rows) use ($targetConn, $table, $columns, &$lastMigratedId, &$rowsCopied, $runId, $dryRun, $allowOrphans, &$errors, $pk) {
+        $query->chunk($batchSize, function ($rows) use ($sourceConn, $targetConn, $table, $columns, &$lastMigratedId, &$rowsCopied, $runId, $dryRun, $allowOrphans, &$errors, $pk) {
             $recordsToInsert = [];
 
             foreach ($rows as $row) {
@@ -488,8 +501,11 @@ class MigrateToPgSQL extends Command
                     $record['updated_at'] = Carbon::parse($record['updated_at'])->toDateTimeString();
                 }
 
-                // 6. Validate Orphans (against TARGET database connection)
-                if ($orphanError = $this->detectOrphan($targetConn, $table, $record)) {
+                // 6. Validate relationships against the populated side
+                // Preflight already validated source relationships. During a dry-run no
+                // parent rows exist in the target, so validate against the read-only source.
+                $relationshipConn = $dryRun ? $sourceConn : $targetConn;
+                if ($orphanError = $this->detectOrphan($relationshipConn, $table, $record)) {
                     $isCore = in_array($table, $this->coreTransactionalTables);
                     $msg = "Orphaned reference detected in table {$table}, record ID {$record[$pk]}: {$orphanError}";
                     if ($isCore || !$allowOrphans) {
@@ -840,9 +856,6 @@ class MigrateToPgSQL extends Command
     private function runPreflightValidation($sourceConn, $targetConn, $allowOrphans): bool
     {
         $this->info("Running preflight validation checks...");
-        @unlink(base_path('debug_migration.log'));
-        file_put_contents(base_path('debug_migration.log'), "Preflight validation started\n", FILE_APPEND);
-
         // 1. Schema columns inspection to detect "activo" or other columns not in manifest
         foreach ($this->migrateTables as $table) {
             if (!Schema::connection($sourceConn)->hasTable($table)) continue;
@@ -860,7 +873,6 @@ class MigrateToPgSQL extends Command
                     if (strtolower($colName) === 'activo') {
                         $msg = "Preflight failed: Source table '{$table}' contains 'activo' column, which is not in the official migrations schema. Column: {$colName}, Type: {$colType}";
                         $this->error($msg);
-                        file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
                         return false;
                     }
 
@@ -868,12 +880,11 @@ class MigrateToPgSQL extends Command
                     if (!in_array(strtolower($colName), $targetColNames)) {
                         $msg = "Preflight failed: Source column '{$colName}' in table '{$table}' is not present in target schema. Column: {$colName}, Type: {$colType}";
                         $this->error($msg);
-                        file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
                         return false;
                     }
                 }
             } catch (\Throwable $e) {
-                file_put_contents(base_path('debug_migration.log'), "Preflight error on table {$table}: " . $e->getMessage() . "\n", FILE_APPEND);
+                $this->error("Preflight error on table {$table}: " . $e->getMessage());
                 return false;
             }
         }
@@ -883,13 +894,19 @@ class MigrateToPgSQL extends Command
             if (!Schema::connection($sourceConn)->hasTable($table)) {
                 $msg = "Preflight failed: Required table '{$table}' is missing in source SQLite database.";
                 $this->error($msg);
-                file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
                 return false;
             }
             if (!Schema::connection($targetConn)->hasTable($table)) {
                 $msg = "Preflight failed: Required table '{$table}' is missing in target database schema.";
                 $this->error($msg);
-                file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
+                return false;
+            }
+        }
+
+        foreach ($this->regenerateTables as $table) {
+            if (!Schema::connection($targetConn)->hasTable($table)) {
+                $msg = "Preflight failed: Required regenerated table '{$table}' is missing in target database schema.";
+                $this->error($msg);
                 return false;
             }
         }
@@ -919,7 +936,6 @@ class MigrateToPgSQL extends Command
                 if ($invalidCount > 0) {
                     $msg = "Preflight failed: Found {$invalidCount} invalid JSON records in table '{$table}', column '{$col}' in source database.";
                     $this->error($msg);
-                    file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
                     return false;
                 }
             }
@@ -938,7 +954,6 @@ class MigrateToPgSQL extends Command
                     $msg = "Orphan reference in source table {$table}, ID {$record[$pk]}: {$orphanError}";
                     if ($isCore || !$allowOrphans) {
                         $this->error($msg);
-                        file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
                         $hasOrphans = true;
                     } else {
                         $this->warn("{$msg} (Will skip during import)");
@@ -950,7 +965,6 @@ class MigrateToPgSQL extends Command
         if ($hasOrphans) {
             $msg = "Preflight failed: Orphaned references found. Correct them or run with --allow-orphans if permitted.";
             $this->error($msg);
-            file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
             return false;
         }
 
@@ -958,12 +972,10 @@ class MigrateToPgSQL extends Command
         if (!$this->validateDomainFields($sourceConn)) {
             $msg = "Preflight failed: Semantic domain validation failed on orders table.";
             $this->error($msg);
-            file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
             return false;
         }
 
         $this->info("Preflight validation successful!");
-        file_put_contents(base_path('debug_migration.log'), "Preflight validation successful!\n", FILE_APPEND);
         return true;
     }
 
@@ -977,35 +989,40 @@ class MigrateToPgSQL extends Command
         }
 
         $allowedEstados = ['pendiente', 'en_preparacion', 'listo', 'entregado', 'cancelado', 'rechazado', 'completado'];
+        $allowedEstadosPreparacion = ['pendiente', 'en_preparacion', 'listo', 'cancelado'];
         $allowedTipos = ['llevar', 'mesa', 'delivery', 'comedor'];
-        $allowedPagos = ['efectivo', 'tarjeta', 'transferencia', 'sin_pago', 'tarjeta_credito', 'tarjeta_debito', 'transferencia_bancaria', 'online', 'yape', 'plin', 'pos'];
+        $allowedPagos = ['efectivo', 'tarjeta', 'delivery', 'transferencia', 'sin_pago', 'tarjeta_credito', 'tarjeta_debito', 'transferencia_bancaria', 'online', 'yape', 'plin', 'pos'];
 
         $invalidCount = 0;
 
-        DB::connection($conn)->table('orders')->orderBy('id')->lazy()->each(function ($row) use ($allowedEstados, $allowedTipos, $allowedPagos, &$invalidCount) {
+        DB::connection($conn)->table('orders')->orderBy('id')->lazy()->each(function ($row) use ($allowedEstados, $allowedEstadosPreparacion, $allowedTipos, $allowedPagos, &$invalidCount) {
             $record = (array)$row;
             
             // 1. Validate estado
-            if (isset($record['estado']) && !in_array($record['estado'], $allowedEstados)) {
-                $this->error("Semantic failure: Order ID {$record['id']} has invalid estado: '{$record['estado']}'.");
+            if (!isset($record['estado']) || !in_array($record['estado'], $allowedEstados, true)) {
+                $value = $record['estado'] ?? 'NULL';
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid estado: '{$value}'.");
                 $invalidCount++;
             }
 
             // 2. Validate estado_preparacion if present
-            if (isset($record['estado_preparacion']) && !in_array($record['estado_preparacion'], $allowedEstados)) {
-                $this->error("Semantic failure: Order ID {$record['id']} has invalid estado_preparacion: '{$record['estado_preparacion']}'.");
+            if (!isset($record['estado_preparacion']) || !in_array($record['estado_preparacion'], $allowedEstadosPreparacion, true)) {
+                $value = $record['estado_preparacion'] ?? 'NULL';
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid estado_preparacion: '{$value}'.");
                 $invalidCount++;
             }
 
             // 3. Validate tipo_pedido
-            if (isset($record['tipo_pedido']) && !in_array($record['tipo_pedido'], $allowedTipos)) {
-                $this->error("Semantic failure: Order ID {$record['id']} has invalid tipo_pedido: '{$record['tipo_pedido']}'.");
+            if (!isset($record['tipo_pedido']) || !in_array($record['tipo_pedido'], $allowedTipos, true)) {
+                $value = $record['tipo_pedido'] ?? 'NULL';
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid tipo_pedido: '{$value}'.");
                 $invalidCount++;
             }
 
             // 4. Validate metodo_pago
-            if (isset($record['metodo_pago']) && !in_array($record['metodo_pago'], $allowedPagos)) {
-                $this->error("Semantic failure: Order ID {$record['id']} has invalid metodo_pago: '{$record['metodo_pago']}'.");
+            if (!isset($record['metodo_pago']) || !in_array($record['metodo_pago'], $allowedPagos, true)) {
+                $value = $record['metodo_pago'] ?? 'NULL';
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid metodo_pago: '{$value}'.");
                 $invalidCount++;
             }
 
