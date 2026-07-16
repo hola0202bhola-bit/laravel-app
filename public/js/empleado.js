@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let salesHistory = [];
     let allOrders = [];
     let reservations = [];
+    let diningTables = [];
     let categories = [];
     let inventoryHistory = [];
     const adminToken = document.querySelector('meta[name="admin-api-token"]')?.content;
@@ -57,6 +58,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const formCategory = document.getElementById('form-categoria');
     const categoriesList = document.getElementById('categories-list');
     const deleteProductButton = document.getElementById('delete-product');
+    const editReservationModal = document.getElementById('edit-reservation-modal');
+    const closeReservationModal = document.getElementById('close-reservation-modal');
+    const formReservation = document.getElementById('form-reservation');
+    const reservationId = document.getElementById('reservation-id');
+    const reservationDate = document.getElementById('reservation-date');
+    const reservationTime = document.getElementById('reservation-time');
+    const reservationPeople = document.getElementById('reservation-people');
+    const reservationTable = document.getElementById('reservation-table');
+    const reservationStatus = document.getElementById('reservation-status');
 
     lucide.createIcons();
 
@@ -102,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshAllData() {
         try {
-            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchAnalytics(), fetchCategories(), fetchInventoryHistory()]);
+            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchTables(), fetchAnalytics(), fetchCategories(), fetchInventoryHistory()]);
             updateStats();
             renderCatalog();
             updateDropdowns();
@@ -135,6 +145,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await adminFetch('/reservations?t=' + Date.now());
             reservations = await res.json();
         } catch (e) {}
+    }
+
+    async function fetchTables() {
+        const res = await fetch('/api/mesas?t=' + Date.now(), { headers: { 'Accept': 'application/json' } });
+        diningTables = await res.json();
+        updateReservationTables();
     }
 
     async function fetchAnalytics() {
@@ -306,12 +322,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderReservationsTable() {
         reservationsTableBody.innerHTML = '';
         if (reservations.length === 0) {
-            reservationsTableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:16px;">No hay reservaciones de mesa registradas.</td></tr>`;
+            reservationsTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:16px;">No hay reservaciones de mesa registradas.</td></tr>`;
             return;
         }
 
         reservations.forEach(r => {
             const tr = document.createElement('tr');
+            const closed = ['cancelada', 'finalizada'].includes(r.estado);
             tr.innerHTML = `
                 <td><strong>${r.folio}</strong></td>
                 <td>${r.cliente_nombre}</td>
@@ -319,10 +336,88 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${r.fecha} ${r.hora}</td>
                 <td>${r.personas} pers.</td>
                 <td><span class="dest-badge mesa">${r.table ? r.table.numero : 'Mesa'}</span></td>
+                <td><span class="stock-badge ${closed ? 'out' : 'available'}">${r.estado}</span></td>
+                <td>
+                    <button type="button" data-edit-reservation>Editar</button>
+                    <button type="button" data-cancel-reservation ${closed ? 'disabled' : ''}>Cancelar</button>
+                </td>
             `;
+            tr.querySelector('[data-edit-reservation]').addEventListener('click', () => openReservationModal(r));
+            tr.querySelector('[data-cancel-reservation]').addEventListener('click', () => cancelReservation(r));
             reservationsTableBody.appendChild(tr);
         });
     }
+
+    function updateReservationTables() {
+        const current = reservationTable.value;
+        reservationTable.innerHTML = '';
+        diningTables.forEach(table => {
+            reservationTable.add(new Option(`${table.numero} (${table.capacidad} personas)`, table.id));
+        });
+        if (current) reservationTable.value = current;
+    }
+
+    function openReservationModal(reservation) {
+        reservationId.value = reservation.id;
+        reservationDate.value = reservation.fecha;
+        reservationTime.value = reservation.hora.slice(0, 5);
+        reservationPeople.value = reservation.personas;
+        reservationTable.value = reservation.dining_table_id;
+        reservationStatus.value = reservation.estado;
+        editReservationModal.classList.add('active');
+    }
+
+    async function cancelReservation(reservation) {
+        if (!window.confirm(`¿Cancelar la reservación ${reservation.folio}?`)) return;
+        const response = await adminFetch(`/reservations/${reservation.id}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (response.ok) {
+            logToTerminal(`Éxito: ${data.message}`);
+            refreshAllData();
+        } else {
+            logToTerminal(`Error: ${data.message || 'No se pudo cancelar la reservación.'}`);
+        }
+    }
+
+    closeReservationModal.addEventListener('click', () => editReservationModal.classList.remove('active'));
+
+    formReservation.addEventListener('submit', async event => {
+        event.preventDefault();
+        const id = reservationId.value;
+        const original = reservations.find(item => String(item.id) === String(id));
+        const updateResponse = await adminFetch(`/reservations/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+                fecha: reservationDate.value,
+                hora: reservationTime.value,
+                personas: parseInt(reservationPeople.value),
+                dining_table_id: parseInt(reservationTable.value)
+            })
+        });
+        const updated = await updateResponse.json();
+        if (!updateResponse.ok) {
+            const error = updated.errors ? Object.values(updated.errors).flat()[0] : updated.message;
+            logToTerminal(`Error: ${error || 'No se pudo actualizar la reservación.'}`);
+            return;
+        }
+
+        if (original && original.estado !== reservationStatus.value) {
+            const statusResponse = await adminFetch(`/reservations/${id}/status`, {
+                method: 'PATCH',
+                body: JSON.stringify({ estado: reservationStatus.value })
+            });
+            const statusData = await statusResponse.json();
+            if (!statusResponse.ok) {
+                const error = statusData.errors ? Object.values(statusData.errors).flat()[0] : statusData.message;
+                logToTerminal(`Error: ${error || 'No se pudo cambiar el estado.'}`);
+                return;
+            }
+        }
+
+        logToTerminal(`Éxito: Reservación ${updated.folio} actualizada.`);
+        editReservationModal.classList.remove('active');
+        refreshAllData();
+    });
 
     function renderCatalog() {
         const filter = searchInput.value.toLowerCase().trim();
