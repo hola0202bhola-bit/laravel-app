@@ -79,25 +79,44 @@
             </div>
         </section>
 
-        <!-- CHART.JS VISUAL ANALYTICS DASHBOARD -->
+        <!-- REPORTS DASHBOARD -->
         <section class="analytics-grid glass-card" style="padding: 20px;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom: 20px;">
-                <i data-lucide="bar-chart-2" style="color:var(--primary); width:24px; height:24px;"></i>
-                <h2>Dashboard Analítico de Ventas & Rendimiento</h2>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i data-lucide="bar-chart-2" style="color:var(--primary); width:24px; height:24px;"></i>
+                    <div><h2>Reportes de Ventas y Pedidos</h2><small>Periodo predeterminado: últimos 30 días.</small></div>
+                </div>
+                <form id="report-filter-form" style="display:flex; align-items:end; gap:8px; flex-wrap:wrap;">
+                    <div class="form-group"><label for="report-start">Desde</label><input type="date" id="report-start"></div>
+                    <div class="form-group"><label for="report-end">Hasta</label><input type="date" id="report-end"></div>
+                    <button type="submit" class="btn-primary">Aplicar</button>
+                    <button type="button" class="btn-secondary" id="export-sales">CSV ventas</button>
+                    <button type="button" class="btn-secondary" id="export-orders">CSV pedidos</button>
+                </form>
             </div>
-            <div class="charts-row">
+            <p id="report-empty-message" style="display:none; color:var(--text-muted); margin-bottom:16px;">No existen ventas ni pedidos en el periodo seleccionado.</p>
+            <div class="stats-grid" style="margin-bottom:20px;">
+                <div class="stat-card"><div class="stat-info"><span class="stat-label">Ventas del periodo</span><span class="stat-value" id="report-total-sales">$0.00</span></div></div>
+                <div class="stat-card"><div class="stat-info"><span class="stat-label">Número de pedidos</span><span class="stat-value" id="report-order-count">0</span></div></div>
+                <div class="stat-card"><div class="stat-info"><span class="stat-label">Ticket promedio</span><span class="stat-value" id="report-average-ticket">$0.00</span></div></div>
+            </div>
+            <div class="charts-row" style="grid-template-columns:1.5fr 1fr 1fr;">
                 <div class="chart-box">
-                    <h4>Ventas Recientes ($)</h4>
-                    <canvas id="chart-sales-trend"></canvas>
+                    <h4>Ventas agrupadas por día</h4>
+                    <canvas id="chart-daily-sales"></canvas>
                 </div>
                 <div class="chart-box">
-                    <h4>Top 5 Platillos Más Populares</h4>
-                    <canvas id="chart-top-products"></canvas>
+                    <h4>Productos más vendidos</h4>
+                    <div class="table-container"><table class="sales-table"><thead><tr><th>Producto</th><th>Cantidad</th><th>Total</th></tr></thead><tbody id="report-top-products"></tbody></table></div>
                 </div>
                 <div class="chart-box">
-                    <h4>Ingresos por Método de Pago</h4>
-                    <canvas id="chart-payment-methods"></canvas>
+                    <h4>Pedidos por estado</h4>
+                    <div class="table-container"><table class="sales-table"><thead><tr><th>Estado</th><th>Cantidad</th></tr></thead><tbody id="report-order-status"></tbody></table></div>
                 </div>
+            </div>
+            <div class="table-container" style="margin-top:16px;">
+                <h4>Productos con poco inventario</h4>
+                <table class="sales-table"><thead><tr><th>Código</th><th>Producto</th><th>Existencia</th></tr></thead><tbody id="report-low-inventory"></tbody></table>
             </div>
         </section>
 

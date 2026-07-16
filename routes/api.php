@@ -15,6 +15,7 @@ use App\Http\Controllers\Admin\AdminInventoryController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminReservationController;
 use App\Http\Controllers\Admin\AdminUserController;
+use App\Http\Controllers\Admin\AdminReportController;
 
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
@@ -57,6 +58,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin.access'])->group(func
         ->parameters(['products' => 'product:codigo']);
     Route::get('/inventory', [AdminInventoryController::class, 'index']);
     Route::post('/inventory/adjustments', [AdminInventoryController::class, 'adjust']);
+    Route::get('/reports', [AdminReportController::class, 'index']);
+    Route::get('/reports/exports/sales', [AdminReportController::class, 'exportSales']);
+    Route::get('/reports/exports/orders', [AdminReportController::class, 'exportOrders']);
 
     Route::prefix('users')->middleware('administrator.access')->group(function () {
         Route::get('/', [AdminUserController::class, 'index']);
