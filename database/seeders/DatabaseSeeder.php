@@ -42,7 +42,7 @@ class DatabaseSeeder extends Seeder
         foreach ($demoUsers as $demoUser) {
             $user = User::updateOrCreate(
                 ['email' => $demoUser['email']],
-                ['name' => $demoUser['name'], 'password' => Hash::make('Demo123!')]
+                ['name' => $demoUser['name'], 'password' => Hash::make('Demo123!'), 'is_active' => true]
             );
             $user->roles()->sync([$demoUser['role_id']]);
         }

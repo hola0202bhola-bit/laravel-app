@@ -146,6 +146,27 @@
                     </div>
                 </div>
 
+                @if(auth()->user()->hasRole('Administrador'))
+                <!-- EMPLOYEE MANAGEMENT BLOCK -->
+                <div class="sales-history-block glass-card">
+                    <div class="sales-history-header" style="justify-content:space-between;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <i data-lucide="users"></i>
+                            <div><h2>Gestión de Empleados</h2><small>Acceso exclusivo para Administradores.</small></div>
+                        </div>
+                        <button type="button" class="btn-primary" id="new-employee-button">
+                            <i data-lucide="user-plus"></i> Nuevo empleado
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table class="sales-table">
+                            <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead>
+                            <tbody id="employees-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                @endif
+
                 <!-- PRODUCT CATALOG -->
                 <div class="catalog-block">
                     <div class="section-header">
@@ -386,6 +407,31 @@
             </div>
         </div>
     </div>
+
+    @if(auth()->user()->hasRole('Administrador'))
+    <!-- MODAL: CREAR O EDITAR EMPLEADO -->
+    <div class="modal-overlay" id="employee-modal">
+        <div class="modal-card glass-card">
+            <div class="modal-header">
+                <h3 id="employee-modal-title"><i data-lucide="user-cog"></i> Empleado</h3>
+                <button type="button" class="btn-close-modal" id="close-employee-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="employee-form" class="action-form">
+                    <input type="hidden" id="employee-id">
+                    <div class="form-group"><label for="employee-name">Nombre</label><input id="employee-name" maxlength="255" required></div>
+                    <div class="form-group"><label for="employee-email">Correo</label><input type="email" id="employee-email" maxlength="255" required></div>
+                    <div class="form-group"><label for="employee-role">Rol</label><select id="employee-role" required></select></div>
+                    <div class="form-group">
+                        <label for="employee-password">Contraseña <span id="employee-password-help">(mínimo 8 caracteres)</span></label>
+                        <input type="password" id="employee-password" minlength="8" autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn-primary"><i data-lucide="save"></i> Guardar empleado</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    @endif
 
     <!-- MODAL: EDITAR RESERVACIÓN -->
     <div class="modal-overlay" id="edit-reservation-modal">

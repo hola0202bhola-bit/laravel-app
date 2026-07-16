@@ -16,7 +16,7 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        if (!Auth::attempt($validated)) {
+        if (!Auth::attempt($validated + ['is_active' => true])) {
             return response()->json(['error' => 'Credenciales incorrectas.'], 401);
         }
 

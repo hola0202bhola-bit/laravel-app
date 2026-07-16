@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let diningTables = [];
     let categories = [];
     let inventoryHistory = [];
+    let employees = [];
+    let employeeRoles = [];
     const adminToken = document.querySelector('meta[name="admin-api-token"]')?.content;
 
     async function adminFetch(path, options = {}) {
@@ -67,6 +69,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const reservationPeople = document.getElementById('reservation-people');
     const reservationTable = document.getElementById('reservation-table');
     const reservationStatus = document.getElementById('reservation-status');
+    const employeesTableBody = document.getElementById('employees-table-body');
+    const newEmployeeButton = document.getElementById('new-employee-button');
+    const employeeModal = document.getElementById('employee-modal');
+    const closeEmployeeModal = document.getElementById('close-employee-modal');
+    const employeeForm = document.getElementById('employee-form');
+    const employeeId = document.getElementById('employee-id');
+    const employeeName = document.getElementById('employee-name');
+    const employeeEmail = document.getElementById('employee-email');
+    const employeeRole = document.getElementById('employee-role');
+    const employeePassword = document.getElementById('employee-password');
+    const employeeModalTitle = document.getElementById('employee-modal-title');
+    const employeePasswordHelp = document.getElementById('employee-password-help');
 
     lucide.createIcons();
 
@@ -112,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshAllData() {
         try {
-            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchTables(), fetchAnalytics(), fetchCategories(), fetchInventoryHistory()]);
+            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchTables(), fetchAnalytics(), fetchCategories(), fetchInventoryHistory(), fetchEmployees()]);
             updateStats();
             renderCatalog();
             updateDropdowns();
@@ -120,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderSalesTable();
             renderReservationsTable();
             renderCategories();
+            renderEmployeesTable();
         } catch (e) {
             logToTerminal('Error al conectar con el servidor.');
         }
@@ -172,6 +187,147 @@ document.addEventListener('DOMContentLoaded', () => {
         inventoryHistory = await res.json();
         renderInventoryHistory();
     }
+
+    async function fetchEmployees() {
+        if (!employeesTableBody) return;
+        const response = await adminFetch('/users?t=' + Date.now());
+        if (!response.ok) throw new Error('No se pudo consultar empleados.');
+        const data = await response.json();
+        employees = data.users || [];
+        employeeRoles = data.roles || [];
+        updateEmployeeRoles();
+    }
+
+    function updateEmployeeRoles() {
+        if (!employeeRole) return;
+        const selected = employeeRole.value;
+        employeeRole.innerHTML = '<option value="">Seleccione un rol...</option>';
+        employeeRoles.forEach(role => employeeRole.add(new Option(role.nombre, role.id)));
+        if (selected) employeeRole.value = selected;
+    }
+
+    function escapeHtml(value) {
+        const element = document.createElement('div');
+        element.textContent = value == null ? '' : String(value);
+        return element.innerHTML;
+    }
+
+    function renderEmployeesTable() {
+        if (!employeesTableBody) return;
+        employeesTableBody.innerHTML = '';
+        if (employees.length === 0) {
+            employeesTableBody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:16px;">No hay empleados registrados.</td></tr>';
+            return;
+        }
+
+        employees.forEach(employee => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><strong>${escapeHtml(employee.name)}</strong></td>
+                <td>${escapeHtml(employee.email)}</td>
+                <td>${escapeHtml(employee.role?.nombre || 'Sin rol')}</td>
+                <td><span class="stock-badge ${employee.is_active ? 'available' : 'out'}">${employee.is_active ? 'Activo' : 'Inactivo'}</span></td>
+                <td>
+                    <button type="button" class="btn-secondary" data-edit-employee>Editar</button>
+                    <button type="button" class="btn-secondary" data-toggle-employee>${employee.is_active ? 'Desactivar' : 'Activar'}</button>
+                </td>`;
+            row.querySelector('[data-edit-employee]').addEventListener('click', () => openEmployeeModal(employee));
+            row.querySelector('[data-toggle-employee]').addEventListener('click', () => toggleEmployee(employee));
+            employeesTableBody.appendChild(row);
+        });
+    }
+
+    function openEmployeeModal(employee = null) {
+        employeeForm.reset();
+        employeeId.value = employee?.id || '';
+        employeeName.value = employee?.name || '';
+        employeeEmail.value = employee?.email || '';
+        employeeRole.value = employee?.role?.id || '';
+        employeePassword.required = !employee;
+        employeeModalTitle.textContent = employee ? 'Editar empleado' : 'Nuevo empleado';
+        employeePasswordHelp.textContent = employee ? '(dejar vacía para conservarla)' : '(mínimo 8 caracteres)';
+        employeeModal.classList.add('active');
+    }
+
+    async function responseError(response, fallback) {
+        const data = await response.json();
+        return data.errors ? Object.values(data.errors).flat()[0] : (data.message || data.error || fallback);
+    }
+
+    async function toggleEmployee(employee) {
+        const action = employee.is_active ? 'desactivar' : 'activar';
+        if (!window.confirm(`¿Confirmas que deseas ${action} la cuenta de ${employee.name}?`)) return;
+        const response = await adminFetch(`/users/${employee.id}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: !employee.is_active })
+        });
+        if (!response.ok) {
+            logToTerminal(`Error: ${await responseError(response, 'No se pudo cambiar el estado.')}`);
+            return;
+        }
+        logToTerminal(`Éxito: Cuenta ${employee.is_active ? 'desactivada' : 'activada'}.`);
+        refreshAllData();
+    }
+
+    if (newEmployeeButton) newEmployeeButton.addEventListener('click', () => openEmployeeModal());
+    if (closeEmployeeModal) closeEmployeeModal.addEventListener('click', () => employeeModal.classList.remove('active'));
+    if (employeeForm) employeeForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        const id = employeeId.value;
+        const original = employees.find(employee => String(employee.id) === String(id));
+        const roleChanged = original && String(original.role?.id || '') !== employeeRole.value;
+        const passwordChanged = Boolean(employeePassword.value);
+
+        if (roleChanged && !window.confirm('Cambiar el rol modifica los accesos de esta cuenta. ¿Continuar?')) return;
+        if (passwordChanged && original && !window.confirm('Se invalidarán las sesiones de esta cuenta al cambiar la contraseña. ¿Continuar?')) return;
+
+        if (!id) {
+            const response = await adminFetch('/users', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: employeeName.value,
+                    email: employeeEmail.value,
+                    role_id: Number(employeeRole.value),
+                    password: employeePassword.value
+                })
+            });
+            if (!response.ok) {
+                logToTerminal(`Error: ${await responseError(response, 'No se pudo crear el empleado.')}`);
+                return;
+            }
+        } else {
+            const updateResponse = await adminFetch(`/users/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ name: employeeName.value, email: employeeEmail.value })
+            });
+            if (!updateResponse.ok) {
+                logToTerminal(`Error: ${await responseError(updateResponse, 'No se pudo editar el empleado.')}`);
+                return;
+            }
+            if (roleChanged) {
+                const roleResponse = await adminFetch(`/users/${id}/role`, {
+                    method: 'PATCH', body: JSON.stringify({ role_id: Number(employeeRole.value) })
+                });
+                if (!roleResponse.ok) {
+                    logToTerminal(`Error: ${await responseError(roleResponse, 'No se pudo asignar el rol.')}`);
+                    return;
+                }
+            }
+            if (passwordChanged) {
+                const passwordResponse = await adminFetch(`/users/${id}/password`, {
+                    method: 'PATCH', body: JSON.stringify({ password: employeePassword.value })
+                });
+                if (!passwordResponse.ok) {
+                    logToTerminal(`Error: ${await responseError(passwordResponse, 'No se pudo cambiar la contraseña.')}`);
+                    return;
+                }
+            }
+        }
+
+        logToTerminal(`Éxito: Empleado ${id ? 'actualizado' : 'creado'}.`);
+        employeeModal.classList.remove('active');
+        refreshAllData();
+    });
 
     function renderCharts(data) {
         if (typeof Chart === 'undefined') return;

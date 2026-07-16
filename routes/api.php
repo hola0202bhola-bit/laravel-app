@@ -14,6 +14,7 @@ use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminInventoryController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminReservationController;
+use App\Http\Controllers\Admin\AdminUserController;
 
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
@@ -56,4 +57,13 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin.access'])->group(func
         ->parameters(['products' => 'product:codigo']);
     Route::get('/inventory', [AdminInventoryController::class, 'index']);
     Route::post('/inventory/adjustments', [AdminInventoryController::class, 'adjust']);
+
+    Route::prefix('users')->middleware('administrator.access')->group(function () {
+        Route::get('/', [AdminUserController::class, 'index']);
+        Route::post('/', [AdminUserController::class, 'store']);
+        Route::match(['put', 'patch'], '/{user}', [AdminUserController::class, 'update']);
+        Route::patch('/{user}/role', [AdminUserController::class, 'updateRole']);
+        Route::patch('/{user}/password', [AdminUserController::class, 'updatePassword']);
+        Route::patch('/{user}/status', [AdminUserController::class, 'updateStatus']);
+    });
 });
