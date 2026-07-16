@@ -19,7 +19,7 @@ class AdminAuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        if (!Auth::attempt($credentials)) {
+        if (!Auth::attempt($credentials + ['is_active' => true])) {
             return back()->withErrors(['email' => 'Credenciales incorrectas.'])->onlyInput('email');
         }
 

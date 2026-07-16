@@ -16,6 +16,10 @@ class KitchenAccess
             return response()->json(['error' => 'Usuario no autenticado.'], 401);
         }
 
+        if ($user->is_active === false) {
+            return response()->json(['error' => 'La cuenta está inactiva.'], 403);
+        }
+
         // Default to all authorized kitchen roles if none specified
         if (empty($roles)) {
             $roles = ['cocina', 'Barista/Cocinero', 'gerente', 'administrador'];

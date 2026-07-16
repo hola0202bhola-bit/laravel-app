@@ -20,6 +20,14 @@ class AdminAccess
             return redirect()->route('employee.login');
         }
 
+        if ($user->is_active === false) {
+            if ($request->expectsJson()) {
+                return response()->json(['error' => 'La cuenta está inactiva.'], 403);
+            }
+
+            abort(403, 'La cuenta está inactiva.');
+        }
+
         $authorized = $user->roles()
             ->whereIn('nombre', ['Administrador', 'Gerente'])
             ->exists();
