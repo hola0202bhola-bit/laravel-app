@@ -71,10 +71,21 @@ class ReservationManagementTest extends TestCase
         $response = $this->postJson('/api/reservaciones/crear', $this->payload())
             ->assertCreated()
             ->assertJsonPath('reservacion.estado', 'pendiente')
+            ->assertJsonPath('reservacion.hora', '12:00')
             ->assertJsonPath('reservacion.table.numero', 'Mesa 1');
 
         $this->assertNotEmpty($response->json('reservacion.folio'));
         $this->assertSame('reservada', $this->table->fresh()->estado);
+    }
+
+    public function test_reservation_api_always_serializes_time_as_hours_and_minutes(): void
+    {
+        $reservation = $this->reservation(['hora' => '09:05:00']);
+        $this->actAs($this->adminRole);
+
+        $this->getJson("/api/admin/reservations/{$reservation->id}")
+            ->assertOk()
+            ->assertJsonPath('hora', '09:05');
     }
 
     public function test_admin_can_update_schedule_people_and_table(): void

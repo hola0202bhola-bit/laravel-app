@@ -15,6 +15,11 @@ class TableReservation extends Model
         'dining_table_id' => 'integer',
     ];
 
+    public function getHoraAttribute(?string $value): ?string
+    {
+        return $value === null ? null : substr($value, 0, 5);
+    }
+
     public function table()
     {
         return $this->belongsTo(DiningTable::class, 'dining_table_id');
