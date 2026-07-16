@@ -17,7 +17,7 @@ class AnalyticsController extends Controller
         $salesTrend = $sales->take(10)->map(function ($s) {
             return [
                 'label' => '#' . $s->id,
-                'total' => floatval($s->total)
+                'total' => (string) $s->total
             ];
         });
 
@@ -37,9 +37,9 @@ class AnalyticsController extends Controller
         // 3. Payment Methods Breakdown
         $orders = Order::all();
         $paymentBreakdown = [
-            'Efectivo' => $orders->where('metodo_pago', 'efectivo')->sum('total'),
-            'Tarjeta' => $orders->where('metodo_pago', 'tarjeta')->sum('total'),
-            'Delivery App' => $orders->where('metodo_pago', 'delivery')->sum('total')
+            'Efectivo' => $this->sumMoney($orders->where('metodo_pago', 'efectivo')),
+            'Tarjeta' => $this->sumMoney($orders->where('metodo_pago', 'tarjeta')),
+            'Delivery App' => $this->sumMoney($orders->where('metodo_pago', 'delivery'))
         ];
 
         return response()->json([
@@ -49,8 +49,16 @@ class AnalyticsController extends Controller
                 'data' => array_values($topProducts)
             ],
             'paymentBreakdown' => $paymentBreakdown,
-            'grandTotal' => $sales->sum('total'),
+            'grandTotal' => $this->sumMoney($sales),
             'totalOrders' => $orders->count()
         ]);
+    }
+
+    private function sumMoney($records): string
+    {
+        return $records->reduce(
+            fn (string $total, $record) => bcadd($total, (string) $record->total, 2),
+            '0.00'
+        );
     }
 }

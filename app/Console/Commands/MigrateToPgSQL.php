@@ -560,6 +560,9 @@ class MigrateToPgSQL extends Command
     private function detectOrphan($conn, $table, $record): ?string
     {
         $relations = [
+            'products' => [
+                'category_id' => ['table' => 'categories', 'column' => 'id'],
+            ],
             'user_roles' => [
                 'user_id' => ['table' => 'users', 'column' => 'id'],
                 'role_id' => ['table' => 'roles', 'column' => 'id'],

@@ -9,6 +9,10 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\OrderTrackingController;
 use App\Http\Controllers\KitchenController;
+use App\Http\Controllers\Admin\AdminCategoryController;
+use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\AdminInventoryController;
+use App\Http\Controllers\Admin\AdminProductController;
 
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
@@ -23,19 +27,12 @@ Route::get('/events', [StreamController::class, 'events']);
 Route::get('/productos', [ProductController::class, 'index']);
 Route::get('/custom/bases', [ProductController::class, 'customBases']);
 Route::get('/custom/options', [ProductController::class, 'customOptions']);
-Route::post('/registrar', [ProductController::class, 'store']);
-Route::post('/reabastecer', [ProductController::class, 'reabastecer']);
-Route::post('/precio', [ProductController::class, 'actualizarPrecio']);
-Route::put('/productos/{codigo}', [ProductController::class, 'update']);
 
-Route::get('/pedidos', [OrderController::class, 'index']);
 Route::post('/pedidos/crear', [OrderController::class, 'store']);
 Route::post('/pedidos/estado', [OrderController::class, 'updateStatus'])
     ->middleware(['auth:sanctum', 'kitchen.access:gerente,administrador']);
-Route::get('/ventas', [OrderController::class, 'sales']);
 
 Route::get('/mesas', [ReservationController::class, 'tables']);
-Route::get('/reservaciones', [ReservationController::class, 'index']);
 Route::post('/reservaciones/crear', [ReservationController::class, 'store']);
 
 Route::middleware(['auth:sanctum', 'kitchen.access'])->group(function () {
@@ -44,4 +41,16 @@ Route::middleware(['auth:sanctum', 'kitchen.access'])->group(function () {
     Route::post('/cocina/items/estado', [KitchenController::class, 'updateItemStatus']);
 });
 
-Route::get('/analytics/stats', [AnalyticsController::class, 'stats']);
+Route::prefix('admin')->middleware(['auth:sanctum', 'admin.access'])->group(function () {
+    Route::get('/dashboard', [AdminDashboardController::class, 'index']);
+    Route::get('/orders', [OrderController::class, 'index']);
+    Route::get('/sales', [OrderController::class, 'sales']);
+    Route::get('/analytics', [AnalyticsController::class, 'stats']);
+    Route::get('/reservations', [ReservationController::class, 'index']);
+
+    Route::apiResource('categories', AdminCategoryController::class);
+    Route::apiResource('products', AdminProductController::class)
+        ->parameters(['products' => 'product:codigo']);
+    Route::get('/inventory', [AdminInventoryController::class, 'index']);
+    Route::post('/inventory/adjustments', [AdminInventoryController::class, 'adjust']);
+});

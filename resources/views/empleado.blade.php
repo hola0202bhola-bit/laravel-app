@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="admin-api-token" content="{{ $adminApiToken }}">
     <title>Café Sublime - Panel de Empleado (Laravel)</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,6 +41,10 @@
                     <span class="status-dot pulsing"></span>
                     <span>Sincronizado en Vivo</span>
                 </div>
+                <form method="POST" action="{{ route('employee.logout') }}">
+                    @csrf
+                    <button type="submit" class="btn-secondary">Cerrar sesión</button>
+                </form>
             </div>
         </header>
 
@@ -181,6 +186,16 @@
                     </div>
                 </div>
 
+                <div class="sales-history-block glass-card">
+                    <div class="sales-history-header"><i data-lucide="history"></i><h2>Movimientos recientes de inventario</h2></div>
+                    <div class="table-container">
+                        <table class="sales-table">
+                            <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th></tr></thead>
+                            <tbody id="inventory-history-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
             </section>
 
             <!-- SIDEBAR ACTIONS & TERMINAL -->
@@ -226,6 +241,10 @@
                                     <label for="reg-descripcion">Descripción</label>
                                     <input type="text" id="reg-descripcion" placeholder="Ej. Deliciosa combinación con espresso y chocolate...">
                                 </div>
+                                <div class="form-group">
+                                    <label for="reg-category">Categoría</label>
+                                    <select id="reg-category"><option value="">Sin categoría</option></select>
+                                </div>
                                 <div class="form-row">
                                     <div class="form-group">
                                         <label for="reg-precio">Precio Unitario ($)</label>
@@ -254,7 +273,11 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="reabastecer-cantidad">Cantidad a Añadir</label>
-                                    <input type="number" id="reabastecer-cantidad" min="1" value="5" required>
+                                    <input type="number" id="reabastecer-cantidad" value="5" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="reabastecer-motivo">Motivo</label>
+                                    <input type="text" id="reabastecer-motivo" value="Reabastecimiento" required>
                                 </div>
                                 <button type="submit" class="btn-primary">
                                     <i data-lucide="plus"></i> Añadir Stock
@@ -282,6 +305,16 @@
                             </form>
                         </div>
                     </div>
+                </div>
+
+                <div class="actions-container glass-card" style="margin-top: 20px; padding: 20px;">
+                    <h3>Categorías</h3>
+                    <form id="form-categoria" class="action-form">
+                        <div class="form-group"><label for="category-name">Nombre</label><input id="category-name" required></div>
+                        <div class="form-group"><label for="category-icon">Icono</label><input id="category-icon"></div>
+                        <button type="submit" class="btn-primary">Agregar categoría</button>
+                    </form>
+                    <div id="categories-list" style="margin-top: 12px;"></div>
                 </div>
 
                 <!-- TERMINAL LOG -->
@@ -325,6 +358,10 @@
                         <label for="edit-descripcion">Descripción</label>
                         <input type="text" id="edit-descripcion">
                     </div>
+                    <div class="form-group">
+                        <label for="edit-category">Categoría</label>
+                        <select id="edit-category"><option value="">Sin categoría</option></select>
+                    </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="edit-precio">Precio Unitario ($)</label>
@@ -332,7 +369,7 @@
                         </div>
                         <div class="form-group">
                             <label for="edit-existencia">Existencia en Stock</label>
-                            <input type="number" id="edit-existencia" min="0" required>
+                            <input type="number" id="edit-existencia" disabled>
                         </div>
                     </div>
                     <div class="form-group">
@@ -342,6 +379,7 @@
                     <button type="submit" class="btn-primary">
                         <i data-lucide="save"></i> Guardar Cambios
                     </button>
+                    <button type="button" class="btn-secondary" id="delete-product">Eliminar producto</button>
                 </form>
             </div>
         </div>

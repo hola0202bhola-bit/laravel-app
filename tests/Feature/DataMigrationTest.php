@@ -147,6 +147,7 @@ class DataMigrationTest extends TestCase
             'payment_methods' => function ($table) { $table->id(); },
             'products' => function ($table) {
                 $table->id();
+                $table->integer('category_id')->nullable();
                 $table->integer('codigo')->unique();
                 $table->decimal('precio', 8, 2);
                 $table->json('extras')->nullable();
@@ -808,6 +809,25 @@ class DataMigrationTest extends TestCase
         ])->run();
 
         $this->assertEquals(1, $exitCode);
+    }
+
+    public function test_orphan_detection_product_category_reference()
+    {
+        DB::connection('migration_source')->table('products')->insert([
+            'id' => 1,
+            'codigo' => 101,
+            'category_id' => 999,
+            'precio' => '25.00',
+        ]);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true,
+        ])->run();
+
+        $this->assertEquals(1, $exitCode);
+        $this->assertEquals(0, DB::connection('migration_target')->table('products')->count());
     }
 
     public function test_orphan_detection_sale_details_sale_id()

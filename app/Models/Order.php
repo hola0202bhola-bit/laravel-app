@@ -13,7 +13,7 @@ class Order extends Model
 
     protected $casts = [
         'items' => 'array',
-        'total' => 'float'
+        'total' => 'decimal:2'
     ];
 
     public function recalculatePreparationStatus(): string

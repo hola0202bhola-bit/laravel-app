@@ -13,8 +13,14 @@ class Product extends Model
 
     protected $casts = [
         'extras' => 'array',
-        'precio' => 'float',
+        'precio' => 'decimal:2',
         'existencia' => 'integer',
-        'codigo' => 'integer'
+        'codigo' => 'integer',
+        'category_id' => 'integer',
     ];
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class);
+    }
 }
