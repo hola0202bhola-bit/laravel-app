@@ -9,4 +9,9 @@ class DiningTable extends Model
 {
     use HasFactory;
     protected $guarded = [];
+
+    public function reservations()
+    {
+        return $this->hasMany(TableReservation::class);
+    }
 }

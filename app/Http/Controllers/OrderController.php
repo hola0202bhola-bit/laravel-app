@@ -40,25 +40,25 @@ class OrderController extends Controller
 
         // Deduct stock & Process item pricing
         $processedItems = [];
-        $grandTotal = 0;
+        $grandTotal = '0.00';
 
         foreach ($items as $item) {
             $product = Product::where('codigo', $item['codigo'])->first();
             $product->decrement('existencia', intval($item['cantidad']));
 
-            $unitPrice = $product->precio;
-            if (($item['tamano'] ?? '') === 'Mediano') $unitPrice += 5.00;
-            if (($item['tamano'] ?? '') === 'Grande') $unitPrice += 10.00;
+            $unitPrice = bcadd((string) $product->precio, '0.00', 2);
+            if (($item['tamano'] ?? '') === 'Mediano') $unitPrice = bcadd($unitPrice, '5.00', 2);
+            if (($item['tamano'] ?? '') === 'Grande') $unitPrice = bcadd($unitPrice, '10.00', 2);
 
-            $extrasCost = 0;
+            $extrasCost = '0.00';
             $extrasList = $item['extras'] ?? [];
             foreach ($extrasList as $ext) {
-                $extrasCost += floatval($ext['precio']);
+                $extrasCost = bcadd($extrasCost, (string) $ext['precio'], 2);
             }
 
-            $finalUnitPrice = $unitPrice + $extrasCost;
-            $subtotal = $finalUnitPrice * intval($item['cantidad']);
-            $grandTotal += $subtotal;
+            $finalUnitPrice = bcadd($unitPrice, $extrasCost, 2);
+            $subtotal = bcmul($finalUnitPrice, (string) intval($item['cantidad']), 2);
+            $grandTotal = bcadd($grandTotal, $subtotal, 2);
 
             $processedItems[] = [
                 'id' => 'item_' . \Illuminate\Support\Str::random(10),
@@ -66,7 +66,7 @@ class OrderController extends Controller
                 'codigo' => $product->codigo,
                 'nombre' => $product->nombre,
                 'tamano' => $item['tamano'] ?? 'Chico',
-                'precioBase' => $product->precio,
+                'precioBase' => (string) $product->precio,
                 'extras' => $extrasList,
                 'precioFinalUnitario' => $finalUnitPrice,
                 'cantidad' => intval($item['cantidad']),

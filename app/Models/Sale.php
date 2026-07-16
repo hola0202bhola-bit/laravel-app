@@ -13,6 +13,6 @@ class Sale extends Model
 
     protected $casts = [
         'items' => 'array',
-        'total' => 'float'
+        'total' => 'decimal:2'
     ];
 }

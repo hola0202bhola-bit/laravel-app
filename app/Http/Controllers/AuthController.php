@@ -22,7 +22,7 @@ class AuthController extends Controller
 
         $user = Auth::user();
         $roles = $user->roles()->pluck('nombre')->toArray();
-        $token = $user->createToken('KdsToken')->plainTextToken;
+        $token = $user->createToken('KdsToken', ['kitchen'], now()->addHours(8))->plainTextToken;
 
         return response()->json([
             'message' => 'Inicio de sesión exitoso.',

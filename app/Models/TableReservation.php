@@ -9,4 +9,9 @@ class TableReservation extends Model
 {
     use HasFactory;
     protected $guarded = [];
+
+    public function table()
+    {
+        return $this->belongsTo(DiningTable::class, 'dining_table_id');
+    }
 }
