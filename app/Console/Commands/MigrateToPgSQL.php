@@ -9,6 +9,8 @@ use Carbon\Carbon;
 
 class MigrateToPgSQL extends Command
 {
+    const MANIFEST_VERSION = '2.0.0';
+
     /**
      * The name and signature of the console command.
      */
@@ -30,8 +32,8 @@ class MigrateToPgSQL extends Command
      */
     protected $description = 'Migrate Cafe Sublime database from SQLite to PostgreSQL with transactional integrity';
 
-    // List of business tables in topological dependency order
-    protected $topologicalTables = [
+    // List of business tables to migrate in topological dependency order
+    protected $migrateTables = [
         // Level 0 (no dependencies)
         'users',
         'roles',
@@ -49,7 +51,6 @@ class MigrateToPgSQL extends Command
         'payment_methods',
         'products',
         'sales',
-        'failed_jobs',
         
         // Level 1 (direct dependencies)
         'user_roles',
@@ -65,10 +66,23 @@ class MigrateToPgSQL extends Command
         // Level 2 (dependencies on Level 1)
         'custom_item_details',
         'order_status_histories',
-        'personal_access_tokens',
         'sale_details',
         'inventory_logs',
         'order_item_extras'
+    ];
+
+    // Tables that must be left empty in PostgreSQL or regenerated empty
+    protected $regenerateTables = [
+        'personal_access_tokens',
+        'failed_jobs'
+    ];
+
+    // Tables excluded from normal business migration flow
+    protected $excludedTables = [
+        'migrations',
+        'password_reset_tokens',
+        'data_migration_runs',
+        'data_migration_checkpoints'
     ];
 
     // Core transactional tables where orphans are strictly forbidden
@@ -113,6 +127,8 @@ class MigrateToPgSQL extends Command
         $originalOptions = config("database.connections.{$sourceConn}.options", []);
         $sourceDriver = config("database.connections.{$sourceConn}.driver");
 
+        $runId = null;
+
         try {
             // Enforce SQLite source connection to be opened in read-only mode dynamically
             if ($sourceDriver === 'sqlite') {
@@ -139,7 +155,7 @@ class MigrateToPgSQL extends Command
 
             // Verify target business tables status
             $nonEmptyTables = [];
-            foreach ($this->topologicalTables as $table) {
+            foreach ($this->migrateTables as $table) {
                 if (Schema::connection($targetConn)->hasTable($table)) {
                     $count = DB::connection($targetConn)->table($table)->count();
                     if ($count > 0) {
@@ -169,9 +185,14 @@ class MigrateToPgSQL extends Command
             }
 
             // Handle resume or new run
-            $runId = null;
             $completedTables = [];
             $checkpoints = [];
+
+            // Gather current database metadata
+            $currentSourceChecksum = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? hash_file('sha256', $sourceDbPath) : 'in-memory-checksum';
+            $currentSourceSize = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? filesize($sourceDbPath) : 0;
+            $currentTargetFingerprint = $this->computeTargetFingerprint($targetConn);
+            $currentCodeCommit = $this->getCodeCommit();
 
             if ($resume) {
                 if (!$runIdOpt) {
@@ -193,18 +214,29 @@ class MigrateToPgSQL extends Command
                     return 1;
                 }
 
-                // Gather current database metadata
-                $currentSourceChecksum = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? hash_file('sha256', $sourceDbPath) : 'in-memory-checksum';
-                $currentTargetFingerprint = hash('sha256', $targetConn . '-' . config("database.connections.{$targetConn}.database"));
-
                 // Verify source and target integrity
                 if ($lastRun->source_checksum !== $currentSourceChecksum) {
                     $this->error("Abort resume: Source SQLite database file checksum has changed since the migration started.");
                     return 1;
                 }
 
+                if (($lastRun->source_size ?? 0) != $currentSourceSize) {
+                    $this->error("Abort resume: Source SQLite database file size has changed since the migration started.");
+                    return 1;
+                }
+
                 if ($lastRun->target_fingerprint !== $currentTargetFingerprint) {
                     $this->error("Abort resume: Target database fingerprint has changed since the migration started.");
+                    return 1;
+                }
+
+                if (($lastRun->manifest_version ?? '1.0.0') !== self::MANIFEST_VERSION) {
+                    $this->error("Abort resume: Migrator manifest version does not match original run.");
+                    return 1;
+                }
+
+                if ($lastRun->code_commit !== $currentCodeCommit) {
+                    $this->error("Abort resume: Code repository commit hash does not match original run.");
                     return 1;
                 }
 
@@ -221,6 +253,11 @@ class MigrateToPgSQL extends Command
 
                 $runId = $lastRun->id;
                 $this->info("Resuming migration run ID: {$runId}");
+
+                // Update run status to running
+                DB::connection($targetConn)->table('data_migration_runs')
+                    ->where('id', $runId)
+                    ->update(['status' => 'running', 'updated_at' => now()]);
 
                 $dbCheckpoints = DB::connection($targetConn)
                     ->table('data_migration_checkpoints')
@@ -239,25 +276,26 @@ class MigrateToPgSQL extends Command
                     return 0;
                 }
 
-                // Gather metadata for new run
-                $sourceChecksum = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? hash_file('sha256', $sourceDbPath) : 'in-memory-checksum';
-                $sourceSize = ($sourceDbPath !== ':memory:' && file_exists($sourceDbPath)) ? filesize($sourceDbPath) : 0;
-                $targetFingerprint = hash('sha256', $targetConn . '-' . config("database.connections.{$targetConn}.database"));
-                $codeCommit = trim(@shell_exec('git rev-parse HEAD')) ?: 'unknown';
-
                 if (!$dryRun) {
+                    // Truncate regenerateTables on a fresh new run
+                    foreach ($this->regenerateTables as $table) {
+                        if (Schema::connection($targetConn)->hasTable($table)) {
+                            DB::connection($targetConn)->table($table)->truncate();
+                        }
+                    }
+
                     $runId = DB::connection($targetConn)->table('data_migration_runs')->insertGetId([
                         'started_at' => now(),
-                        'status' => 'pending',
+                        'status' => 'running',
                         'options' => json_encode([
                             'batch_size' => $batchSize,
                             'allow_orphans' => $allowOrphans
                         ], JSON_THROW_ON_ERROR),
-                        'source_checksum' => $sourceChecksum,
-                        'source_size' => $sourceSize,
-                        'target_fingerprint' => $targetFingerprint,
-                        'manifest_version' => '1.0.0',
-                        'code_commit' => $codeCommit,
+                        'source_checksum' => $currentSourceChecksum,
+                        'source_size' => $currentSourceSize,
+                        'target_fingerprint' => $currentTargetFingerprint,
+                        'manifest_version' => self::MANIFEST_VERSION,
+                        'code_commit' => $currentCodeCommit,
                         'created_at' => now(),
                         'updated_at' => now()
                     ]);
@@ -267,7 +305,7 @@ class MigrateToPgSQL extends Command
 
             // Run migrations topologicially
             $errorsCount = 0;
-            foreach ($this->topologicalTables as $table) {
+            foreach ($this->migrateTables as $table) {
                 if (!Schema::connection($sourceConn)->hasTable($table) || !Schema::connection($targetConn)->hasTable($table)) {
                     $this->warn("Table {$table} does not exist in source or target. Skipping.");
                     continue;
@@ -293,41 +331,79 @@ class MigrateToPgSQL extends Command
                     $errorsCount += $tableErrors;
 
                     if ($tableErrors > 0 && !$allowOrphans) {
-                        $this->error("Aborting migration due to errors/orphans in table: {$table}");
-                        if (!$dryRun) {
-                            DB::connection($targetConn)->table('data_migration_runs')
-                                ->where('id', $runId)->update(['status' => 'failed', 'finished_at' => now()]);
-                        }
+                        $errMsg = "Aborting migration due to errors/orphans in table: {$table}";
+                        $this->error($errMsg);
+                        $this->markRunFailed($targetConn, $runId, $errMsg);
                         return 1;
                     }
-                } catch (\Exception $e) {
-                    $this->error("Failed migrating table {$table}: " . $e->getMessage());
-                    if (!$dryRun) {
-                        DB::connection($targetConn)->table('data_migration_runs')
-                            ->where('id', $runId)->update(['status' => 'failed', 'finished_at' => now()]);
-                    }
+                } catch (\Throwable $e) {
+                    $errMsg = "Failed migrating table {$table}: " . $e->getMessage();
+                    $this->error($errMsg);
+                    file_put_contents(base_path('debug_migration.log'), $errMsg . "\n", FILE_APPEND);
+                    $this->markRunFailed($targetConn, $runId, $errMsg);
                     return 1;
                 }
             }
 
-            // Align sequences in PostgreSQL
-            if (!$dryRun) {
-                $this->info("Aligning PostgreSQL sequences...");
-                $this->alignSequences($targetConn);
-
-                // Set run status to success
-                DB::connection($targetConn)->table('data_migration_runs')
-                    ->where('id', $runId)->update(['status' => 'success', 'finished_at' => now()]);
+            if ($dryRun) {
+                $this->info("Dry-run complete. All steps executed successfully against memory. No data was written.");
+                return 0;
             }
+
+            // Align sequences in PostgreSQL
+            $this->info("Aligning PostgreSQL sequences...");
+            $this->alignSequences($targetConn);
+
+            // Set run status to verifying
+            DB::connection($targetConn)->table('data_migration_runs')
+                ->where('id', $runId)->update(['status' => 'verifying', 'updated_at' => now()]);
 
             $this->info("=== Migration complete! Running validation phase ===");
             $verified = $this->verifyMigration($sourceConn, $targetConn);
 
-            return ($verified && $errorsCount === 0) ? 0 : 1;
+            if ($verified && $errorsCount === 0) {
+                DB::connection($targetConn)->table('data_migration_runs')
+                    ->where('id', $runId)->update(['status' => 'success', 'finished_at' => now(), 'updated_at' => now()]);
+                return 0;
+            } else {
+                $this->markRunFailed($targetConn, $runId, "Verification phase failed or errors count is non-zero.");
+                return 1;
+            }
+        } catch (\Throwable $e) {
+            $msg = "Fatal migration error: " . $e->getMessage() . "\n" . $e->getTraceAsString();
+            $this->error($msg);
+            file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
+            $this->markRunFailed($targetConn, $runId, $e->getMessage());
+            return 1;
         } finally {
             if ($sourceDriver === 'sqlite') {
                 config(["database.connections.{$sourceConn}.options" => $originalOptions]);
                 DB::purge($sourceConn);
+            }
+        }
+    }
+
+    /**
+     * Update run status to failed with finished_at and error summary
+     */
+    private function markRunFailed($targetConn, $runId, string $errorSummary)
+    {
+        if ($runId) {
+            try {
+                $run = DB::connection($targetConn)->table('data_migration_runs')->where('id', $runId)->first();
+                $options = $run ? json_decode($run->options ?? '{}', true) : [];
+                $options['error_summary'] = $errorSummary;
+
+                DB::connection($targetConn)->table('data_migration_runs')
+                    ->where('id', $runId)
+                    ->update([
+                        'status' => 'failed',
+                        'options' => json_encode($options, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        'finished_at' => now(),
+                        'updated_at' => now()
+                    ]);
+            } catch (\Exception $e) {
+                // Ignore failure to write failed state
             }
         }
     }
@@ -348,9 +424,6 @@ class MigrateToPgSQL extends Command
         }
 
         $pk = 'id';
-        if ($table === 'password_reset_tokens') {
-            $pk = 'email';
-        }
 
         // Determine columns
         $columns = Schema::connection($sourceConn)->getColumnListing($table);
@@ -415,7 +488,7 @@ class MigrateToPgSQL extends Command
                     $record['updated_at'] = Carbon::parse($record['updated_at'])->toDateTimeString();
                 }
 
-                // 6. Validate Orphans
+                // 6. Validate Orphans (against TARGET database connection)
                 if ($orphanError = $this->detectOrphan($targetConn, $table, $record)) {
                     $isCore = in_array($table, $this->coreTransactionalTables);
                     $msg = "Orphaned reference detected in table {$table}, record ID {$record[$pk]}: {$orphanError}";
@@ -466,75 +539,75 @@ class MigrateToPgSQL extends Command
     }
 
     /**
-     * Check if record references missing entities
+     * Check if record references missing entities using real database schema relationships
      */
-    private function detectOrphan($targetConn, $table, $record): ?string
+    private function detectOrphan($conn, $table, $record): ?string
     {
         $relations = [
             'user_roles' => [
-                'user_id' => 'users',
-                'role_id' => 'roles'
+                'user_id' => ['table' => 'users', 'column' => 'id'],
+                'role_id' => ['table' => 'roles', 'column' => 'id'],
             ],
             'product_allergens' => [
-                'allergen_id' => 'allergens'
+                'product_codigo' => ['table' => 'products', 'column' => 'codigo'],
+                'allergen_id'    => ['table' => 'allergens', 'column' => 'id'],
             ],
             'product_dietary_tags' => [
-                'dietary_tag_id' => 'dietary_tags'
+                'product_codigo' => ['table' => 'products', 'column' => 'codigo'],
+                'dietary_tag_id' => ['table' => 'dietary_tags', 'column' => 'id'],
             ],
             'ingredient_suppliers' => [
-                'ingredient_id' => 'ingredients',
-                'supplier_id' => 'suppliers'
+                'ingredient_id' => ['table' => 'ingredients', 'column' => 'id'],
+                'supplier_id'   => ['table' => 'suppliers', 'column' => 'id'],
             ],
             'product_recipes' => [
-                'ingredient_id' => 'ingredients'
+                'product_codigo' => ['table' => 'products', 'column' => 'codigo'],
+                'ingredient_id'  => ['table' => 'ingredients', 'column' => 'id'],
             ],
             'product_extras' => [
-                'extra_ingredient_id' => 'extra_ingredients'
+                'product_codigo'      => ['table' => 'products', 'column' => 'codigo'],
+                'extra_ingredient_id' => ['table' => 'extra_ingredients', 'column' => 'id'],
             ],
             'custom_items' => [
-                'custom_base_id' => 'custom_bases'
+                'custom_base_id' => ['table' => 'custom_bases', 'column' => 'id'],
             ],
             'custom_item_details' => [
-                'custom_item_id' => 'custom_items',
-                'custom_option_id' => 'custom_options'
+                'custom_item_id'   => ['table' => 'custom_items', 'column' => 'id'],
+                'custom_option_id' => ['table' => 'custom_options', 'column' => 'id'],
             ],
             'table_reservations' => [
-                'dining_table_id' => 'dining_tables'
+                'dining_table_id' => ['table' => 'dining_tables', 'column' => 'id'],
             ],
             'order_status_histories' => [
-                'order_id' => 'orders',
-                'user_id' => 'users'
-            ],
-            'products' => [
-                'categoria_id' => 'categories'
-            ],
-            'orders' => [
-                'mesa_id' => 'dining_tables',
-                'estado_id' => 'order_statuses'
-            ],
-            'sales' => [
-                'pedido_id' => 'orders',
-                'metodo_pago_id' => 'payment_methods'
+                'order_id' => ['table' => 'orders', 'column' => 'id'],
+                'user_id'  => ['table' => 'users', 'column' => 'id'],
             ],
             'sale_details' => [
-                'venta_id' => 'sales',
-                'producto_id' => 'products'
+                'sale_id'        => ['table' => 'sales', 'column' => 'id'],
+                'product_codigo' => ['table' => 'products', 'column' => 'codigo'],
             ],
             'inventory_logs' => [
-                'ingrediente_id' => 'ingredients',
-                'usuario_id' => 'users'
-            ]
+                'product_codigo' => ['table' => 'products', 'column' => 'codigo'],
+            ],
+            'order_item_extras' => [
+                'order_id'       => ['table' => 'orders', 'column' => 'id'],
+                'product_codigo' => ['table' => 'products', 'column' => 'codigo'],
+            ],
         ];
 
         if (!isset($relations[$table])) {
             return null;
         }
 
-        foreach ($relations[$table] as $fkField => $parentTable) {
-            if (isset($record[$fkField]) && !is_null($record[$fkField])) {
-                $exists = DB::connection($targetConn)->table($parentTable)->where('id', $record[$fkField])->exists();
+        foreach ($relations[$table] as $fkField => $ref) {
+            $value = $record[$fkField] ?? null;
+            if (!is_null($value)) {
+                $exists = DB::connection($conn)
+                    ->table($ref['table'])
+                    ->where($ref['column'], $value)
+                    ->exists();
                 if (!$exists) {
-                    return "Column {$fkField} value {$record[$fkField]} does not exist in parent table {$parentTable}.";
+                    return "Column {$fkField} value {$value} references {$ref['table']}.{$ref['column']} which does not exist.";
                 }
             }
         }
@@ -552,14 +625,16 @@ class MigrateToPgSQL extends Command
             return;
         }
 
-        foreach ($this->topologicalTables as $table) {
-            if ($table === 'password_reset_tokens') continue;
-
-            $maxId = DB::connection($targetConn)->table($table)->max('id');
-            if ($maxId) {
-                DB::connection($targetConn)->statement("SELECT setval(pg_get_serial_sequence('{$table}', 'id'), {$maxId}, true);");
-            } else {
-                DB::connection($targetConn)->statement("SELECT setval(pg_get_serial_sequence('{$table}', 'id'), 1, false);");
+        foreach ($this->migrateTables as $table) {
+            try {
+                $maxId = DB::connection($targetConn)->table($table)->max('id');
+                if ($maxId) {
+                    DB::connection($targetConn)->statement("SELECT setval(pg_get_serial_sequence('{$table}', 'id'), {$maxId}, true);");
+                } else {
+                    DB::connection($targetConn)->statement("SELECT setval(pg_get_serial_sequence('{$table}', 'id'), 1, false);");
+                }
+            } catch (\Throwable $e) {
+                // Table might not have incrementing id sequence
             }
         }
     }
@@ -574,14 +649,15 @@ class MigrateToPgSQL extends Command
         $headers = ['Table', 'Source Row Count', 'Target Row Count', 'Min ID', 'Max ID', 'Source Sum', 'Target Sum', 'Checksum Match'];
         $results = [];
 
-        foreach ($this->topologicalTables as $table) {
+        // Verify migrated tables
+        foreach ($this->migrateTables as $table) {
             if (!Schema::connection($sourceConn)->hasTable($table) || !Schema::connection($targetConn)->hasTable($table)) {
                 $this->error("Verification failed: Required table '{$table}' is missing in source or target schema.");
                 $hasErrors = true;
                 continue;
             }
 
-            $pk = ($table === 'password_reset_tokens') ? 'email' : 'id';
+            $pk = 'id';
 
             $sourceCount = DB::connection($sourceConn)->table($table)->count();
             $targetCount = DB::connection($targetConn)->table($table)->count();
@@ -593,18 +669,16 @@ class MigrateToPgSQL extends Command
                 $maxId = DB::connection($targetConn)->table($table)->max('id');
             }
 
-            // Decimal sums verification
-            $decimalCol = $this->getDecimalColumns($table);
-            $scale = 2;
-            if (!empty($decimalCol)) {
-                $col = $decimalCol[0];
+            // Decimal sums verification for ALL decimal columns
+            $decimalCols = $this->getDecimalColumns($table);
+            $sourceSums = [];
+            $targetSums = [];
+
+            foreach ($decimalCols as $col) {
                 $scale = $this->getDecimalScale($table, $col);
-            }
-            $sourceSum = $this->normalizeDecimalString(0, $scale);
-            $targetSum = $this->normalizeDecimalString(0, $scale);
-            if (!empty($decimalCol)) {
-                $col = $decimalCol[0];
-                
+                $sourceSum = $this->normalizeDecimalString(0, $scale);
+                $targetSum = $this->normalizeDecimalString(0, $scale);
+
                 // SQLite Sum
                 $sourceRows = DB::connection($sourceConn)->table($table)->pluck($col);
                 foreach ($sourceRows as $val) {
@@ -620,6 +694,14 @@ class MigrateToPgSQL extends Command
                         $targetSum = bcadd($targetSum, $this->normalizeDecimalString($val, $scale), $scale);
                     }
                 }
+
+                $sourceSums[$col] = $sourceSum;
+                $targetSums[$col] = $targetSum;
+
+                if ($sourceSum !== $targetSum) {
+                    $this->error("Verification failed: Decimal sum mismatch in table '{$table}', column '{$col}'. Source: {$sourceSum}, Target: {$targetSum}");
+                    $hasErrors = true;
+                }
             }
 
             // SHA-256 Canonical serialization check
@@ -631,19 +713,36 @@ class MigrateToPgSQL extends Command
                 $hasErrors = true;
             }
 
+            $sourceSumStr = empty($decimalCols) ? '0.00' : implode(', ', array_map(fn($c) => "{$c}:{$sourceSums[$c]}", $decimalCols));
+            $targetSumStr = empty($decimalCols) ? '0.00' : implode(', ', array_map(fn($c) => "{$c}:{$targetSums[$c]}", $decimalCols));
+
             $results[] = [
                 $table,
                 $sourceCount,
                 $targetCount,
                 $minId ?? 'N/A',
                 $maxId ?? 'N/A',
-                $sourceSum,
-                $targetSum,
+                $sourceSumStr,
+                $targetSumStr,
                 $checksumMatch
             ];
         }
 
         $this->table($headers, $results);
+
+        // Verify regenerated tables must exist and be empty
+        foreach ($this->regenerateTables as $table) {
+            if (!Schema::connection($targetConn)->hasTable($table)) {
+                $this->error("Verification failed: Regenerated table '{$table}' is missing in target schema.");
+                $hasErrors = true;
+                continue;
+            }
+            $targetCount = DB::connection($targetConn)->table($table)->count();
+            if ($targetCount > 0) {
+                $this->error("Verification failed: Regenerated table '{$table}' has {$targetCount} rows, but must be empty.");
+                $hasErrors = true;
+            }
+        }
 
         // Verification of orders count grouped by preparation status
         if (Schema::connection($sourceConn)->hasTable('orders') && Schema::connection($targetConn)->hasTable('orders')) {
@@ -711,7 +810,7 @@ class MigrateToPgSQL extends Command
             foreach ($record as $key => $value) {
                 if (in_array($key, $decimalCols) && is_numeric($value)) {
                     // Use bcadd to prevent float casting precision loss
-                    $record[$key] = bcadd(trim($value), '0', 2);
+                    $record[$key] = bcadd(trim($value), '0', $this->getDecimalScale($table, $key));
                 } elseif (in_array($key, $boolCols)) {
                     $record[$key] = ($value === 1 || $value === '1' || $value === true);
                 } elseif (in_array($key, $nullableCols) && $value === '') {
@@ -735,31 +834,72 @@ class MigrateToPgSQL extends Command
         return hash_final($sha);
     }
 
+    /**
+     * Run Preflight Validation Check
+     */
     private function runPreflightValidation($sourceConn, $targetConn, $allowOrphans): bool
     {
         $this->info("Running preflight validation checks...");
+        @unlink(base_path('debug_migration.log'));
+        file_put_contents(base_path('debug_migration.log'), "Preflight validation started\n", FILE_APPEND);
 
-        // 1. Verify required tables exist in source and target
-        foreach ($this->topologicalTables as $table) {
-            if ($table === 'migrations' || $table === 'password_reset_tokens' || $table === 'failed_jobs' || $table === 'personal_access_tokens') {
-                continue;
-            }
-            if (!Schema::connection($sourceConn)->hasTable($table)) {
-                $this->error("Preflight failed: Required table '{$table}' is missing in source SQLite database.");
-                return false;
-            }
-            if (!Schema::connection($targetConn)->hasTable($table)) {
-                $this->error("Preflight failed: Required table '{$table}' is missing in target database schema.");
+        // 1. Schema columns inspection to detect "activo" or other columns not in manifest
+        foreach ($this->migrateTables as $table) {
+            if (!Schema::connection($sourceConn)->hasTable($table)) continue;
+
+            try {
+                $sourceCols = DB::connection($sourceConn)->select("PRAGMA table_info(\"{$table}\")");
+                $targetCols = Schema::connection($targetConn)->getColumnListing($table);
+                $targetColNames = array_map('strtolower', $targetCols);
+
+                foreach ($sourceCols as $col) {
+                    $colName = $col->name;
+                    $colType = $col->type;
+
+                    // Abort if column name is 'activo'
+                    if (strtolower($colName) === 'activo') {
+                        $msg = "Preflight failed: Source table '{$table}' contains 'activo' column, which is not in the official migrations schema. Column: {$colName}, Type: {$colType}";
+                        $this->error($msg);
+                        file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
+                        return false;
+                    }
+
+                    // Abort if column in source is not present in target schema
+                    if (!in_array(strtolower($colName), $targetColNames)) {
+                        $msg = "Preflight failed: Source column '{$colName}' in table '{$table}' is not present in target schema. Column: {$colName}, Type: {$colType}";
+                        $this->error($msg);
+                        file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
+                        return false;
+                    }
+                }
+            } catch (\Throwable $e) {
+                file_put_contents(base_path('debug_migration.log'), "Preflight error on table {$table}: " . $e->getMessage() . "\n", FILE_APPEND);
                 return false;
             }
         }
 
-        // 2. Verify all JSON columns contain valid JSON in source
-        foreach ($this->topologicalTables as $table) {
+        // 2. Verify required tables exist in source and target
+        foreach ($this->migrateTables as $table) {
+            if (!Schema::connection($sourceConn)->hasTable($table)) {
+                $msg = "Preflight failed: Required table '{$table}' is missing in source SQLite database.";
+                $this->error($msg);
+                file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
+                return false;
+            }
+            if (!Schema::connection($targetConn)->hasTable($table)) {
+                $msg = "Preflight failed: Required table '{$table}' is missing in target database schema.";
+                $this->error($msg);
+                file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
+                return false;
+            }
+        }
+
+        // 3. Verify all JSON columns contain valid JSON in source
+        foreach ($this->migrateTables as $table) {
             if (!Schema::connection($sourceConn)->hasTable($table)) continue;
             
             $jsonCols = $this->getJSONColumns($table);
-            $pk = ($table === 'password_reset_tokens') ? 'email' : 'id';
+            $pk = 'id';
             foreach ($jsonCols as $col) {
                 $invalidCount = DB::connection($sourceConn)->table($table)
                     ->orderBy($pk)
@@ -777,18 +917,20 @@ class MigrateToPgSQL extends Command
                     ->count();
 
                 if ($invalidCount > 0) {
-                    $this->error("Preflight failed: Found {$invalidCount} invalid JSON records in table '{$table}', column '{$col}' in source database.");
+                    $msg = "Preflight failed: Found {$invalidCount} invalid JSON records in table '{$table}', column '{$col}' in source database.";
+                    $this->error($msg);
+                    file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
                     return false;
                 }
             }
         }
 
-        // 3. Verify no orphaned references in source database
+        // 4. Verify no orphaned references in source database (against SOURCE connection)
         $hasOrphans = false;
-        foreach ($this->topologicalTables as $table) {
+        foreach ($this->migrateTables as $table) {
             if (!Schema::connection($sourceConn)->hasTable($table)) continue;
 
-            $pk = ($table === 'password_reset_tokens') ? 'email' : 'id';
+            $pk = 'id';
             DB::connection($sourceConn)->table($table)->orderBy($pk)->lazy()->each(function ($row) use ($table, $sourceConn, $allowOrphans, $pk, &$hasOrphans) {
                 $record = (array)$row;
                 if ($orphanError = $this->detectOrphan($sourceConn, $table, $record)) {
@@ -796,6 +938,7 @@ class MigrateToPgSQL extends Command
                     $msg = "Orphan reference in source table {$table}, ID {$record[$pk]}: {$orphanError}";
                     if ($isCore || !$allowOrphans) {
                         $this->error($msg);
+                        file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
                         $hasOrphans = true;
                     } else {
                         $this->warn("{$msg} (Will skip during import)");
@@ -805,12 +948,116 @@ class MigrateToPgSQL extends Command
         }
 
         if ($hasOrphans) {
-            $this->error("Preflight failed: Orphaned references found. Correct them or run with --allow-orphans if permitted.");
+            $msg = "Preflight failed: Orphaned references found. Correct them or run with --allow-orphans if permitted.";
+            $this->error($msg);
+            file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
+            return false;
+        }
+
+        // 5. Validate semantic domain fields in orders
+        if (!$this->validateDomainFields($sourceConn)) {
+            $msg = "Preflight failed: Semantic domain validation failed on orders table.";
+            $this->error($msg);
+            file_put_contents(base_path('debug_migration.log'), $msg . "\n", FILE_APPEND);
             return false;
         }
 
         $this->info("Preflight validation successful!");
+        file_put_contents(base_path('debug_migration.log'), "Preflight validation successful!\n", FILE_APPEND);
         return true;
+    }
+
+    /**
+     * Validate semantic domain fields in orders table
+     */
+    private function validateDomainFields($conn): bool
+    {
+        if (!Schema::connection($conn)->hasTable('orders')) {
+            return true;
+        }
+
+        $allowedEstados = ['pendiente', 'en_preparacion', 'listo', 'entregado', 'cancelado', 'rechazado', 'completado'];
+        $allowedTipos = ['llevar', 'mesa', 'delivery', 'comedor'];
+        $allowedPagos = ['efectivo', 'tarjeta', 'transferencia', 'sin_pago', 'tarjeta_credito', 'tarjeta_debito', 'transferencia_bancaria', 'online', 'yape', 'plin', 'pos'];
+
+        $invalidCount = 0;
+
+        DB::connection($conn)->table('orders')->orderBy('id')->lazy()->each(function ($row) use ($allowedEstados, $allowedTipos, $allowedPagos, &$invalidCount) {
+            $record = (array)$row;
+            
+            // 1. Validate estado
+            if (isset($record['estado']) && !in_array($record['estado'], $allowedEstados)) {
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid estado: '{$record['estado']}'.");
+                $invalidCount++;
+            }
+
+            // 2. Validate estado_preparacion if present
+            if (isset($record['estado_preparacion']) && !in_array($record['estado_preparacion'], $allowedEstados)) {
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid estado_preparacion: '{$record['estado_preparacion']}'.");
+                $invalidCount++;
+            }
+
+            // 3. Validate tipo_pedido
+            if (isset($record['tipo_pedido']) && !in_array($record['tipo_pedido'], $allowedTipos)) {
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid tipo_pedido: '{$record['tipo_pedido']}'.");
+                $invalidCount++;
+            }
+
+            // 4. Validate metodo_pago
+            if (isset($record['metodo_pago']) && !in_array($record['metodo_pago'], $allowedPagos)) {
+                $this->error("Semantic failure: Order ID {$record['id']} has invalid metodo_pago: '{$record['metodo_pago']}'.");
+                $invalidCount++;
+            }
+
+            // 5. Validate numero_mesa
+            if (isset($record['tipo_pedido']) && $record['tipo_pedido'] === 'mesa') {
+                if (!isset($record['numero_mesa']) || trim((string)$record['numero_mesa']) === '') {
+                    $this->error("Semantic failure: Order ID {$record['id']} has type 'mesa' but missing or empty numero_mesa.");
+                    $invalidCount++;
+                }
+            }
+        });
+
+        return $invalidCount === 0;
+    }
+
+    /**
+     * Compute target fingerprint securely
+     */
+    private function computeTargetFingerprint(string $conn): string
+    {
+        $config = config("database.connections.{$conn}", []);
+        $host = $config['host'] ?? '';
+        $port = $config['port'] ?? '';
+        $database = $config['database'] ?? '';
+        $schema = $config['schema'] ?? $config['search_path'] ?? 'public';
+        $username = $config['username'] ?? '';
+        
+        $serverVersion = '';
+        try {
+            $serverVersion = DB::connection($conn)->selectOne("SELECT version() as v")->v ?? '';
+        } catch (\Throwable $e) {
+            // Ignore if connection not queryable
+        }
+
+        $payload = json_encode([
+            'host' => $host,
+            'port' => $port,
+            'database' => $database,
+            'schema' => $schema,
+            'username' => $username,
+            'server_version' => $serverVersion
+        ], JSON_THROW_ON_ERROR);
+
+        return hash('sha256', $payload);
+    }
+
+    /**
+     * Get current repository commit hash
+     */
+    private function getCodeCommit(): string
+    {
+        return trim(@shell_exec('git rev-parse HEAD')) ?: 'unknown';
     }
 
     private function getJSONColumns($table): array
@@ -831,6 +1078,7 @@ class MigrateToPgSQL extends Command
             'sales' => ['total'],
             'ingredients' => ['stock_actual', 'costo_unitario'],
             'extra_ingredients' => ['precio'],
+            'product_recipes' => ['cantidad_requerida'],
             'custom_bases' => ['precio_base'],
             'custom_options' => ['precio_adicional'],
             'custom_items' => ['precio_total'],
@@ -856,24 +1104,46 @@ class MigrateToPgSQL extends Command
 
     private function getBooleanColumns($table): array
     {
-        $map = [
-            'categories' => ['activo'],
-            'dining_tables' => ['activo'],
-            'order_statuses' => ['activo'],
-            'payment_methods' => ['activo'],
-            'delivery_providers' => ['activo'],
-            'products' => ['activo'],
-            'extra_ingredients' => ['activo'],
-            'custom_bases' => ['activo'],
-            'custom_options' => ['activo'],
-            'ingredients' => ['activo']
-        ];
-        return $map[$table] ?? [];
+        try {
+            $targetConn = $this->option('target');
+            if (Schema::connection($targetConn)->hasTable($table)) {
+                $columns = Schema::connection($targetConn)->getColumnListing($table);
+                $bools = [];
+                foreach ($columns as $col) {
+                    try {
+                        $type = Schema::connection($targetConn)->getColumnType($table, $col);
+                        if ($type === 'boolean') {
+                            $bools[] = $col;
+                        }
+                    } catch (\Throwable $ex) {
+                        // ignore
+                    }
+                }
+                return $bools;
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+        return [];
     }
 
     private function getDecimalScale($table, $column): int
     {
-        return 2;
+        $map = [
+            'products' => ['precio' => 2],
+            'orders' => ['total' => 2],
+            'sales' => ['total' => 2],
+            'ingredients' => ['stock_actual' => 2, 'costo_unitario' => 2],
+            'extra_ingredients' => ['precio' => 2],
+            'product_recipes' => ['cantidad_requerida' => 2],
+            'custom_bases' => ['precio_base' => 2],
+            'custom_options' => ['precio_adicional' => 2],
+            'custom_items' => ['precio_total' => 2],
+            'delivery_providers' => ['comision_porcentaje' => 2],
+            'sale_details' => ['precio_unitario' => 2, 'subtotal' => 2],
+            'order_item_extras' => ['extra_precio' => 2]
+        ];
+        return $map[$table][$column] ?? 2;
     }
 
     private function normalizeDecimalString($value, int $scale): string
