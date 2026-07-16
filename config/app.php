@@ -185,4 +185,17 @@ return [
         // 'Example' => App\Facades\Example::class,
     ])->toArray(),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Read-Only Maintenance Mode
+    |--------------------------------------------------------------------------
+    |
+    | When read_only is set to true, the application blocks all HTTP write
+    | requests (POST, PUT, DELETE, PATCH). A bypass token can be specified
+    | to perform secure smoke tests.
+    |
+    */
+    'read_only' => filter_var(env('APP_READ_ONLY', false), FILTER_VALIDATE_BOOLEAN),
+    'read_only_bypass_token' => env('APP_READ_ONLY_BYPASS_TOKEN'),
+
 ];

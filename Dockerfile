@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     libzip-dev \
     zip \
-    && docker-php-ext-install pdo pdo_sqlite zip
+    && docker-php-ext-install pdo pdo_sqlite zip bcmath
 
 # Enable Apache rewrite module
 RUN a2enmod rewrite
