@@ -21,3 +21,8 @@ yarn-error.log
 /database/*.sqlite
 /database/*.sqlite-shm
 /database/*.sqlite-wal
+*.sqlite.bak
+*.bak
+database_backup_*.sqlite
+backup_checksum*.sha256
+
