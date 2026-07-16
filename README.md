@@ -1,66 +1,155 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Café Sublime
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Sistema académico de operación para una cafetería. Integra menú y pedidos para clientes, pantalla de cocina (KDS), seguimiento de pedidos y un panel administrativo para productos, categorías, inventario, ventas y reservaciones.
 
-## About Laravel
+## Tecnologías
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- PHP 8.1 o superior y Laravel 10.
+- Laravel Sanctum para tokens y protección de la API.
+- Eloquent ORM, migraciones y seeders.
+- SQLite para ejecución local; el esquema también es compatible con PostgreSQL.
+- Blade, HTML, CSS y JavaScript sin framework de frontend.
+- Chart.js para las gráficas administrativas y Server-Sent Events para actualización operativa.
+- PHPUnit 10 y GitHub Actions para pruebas automatizadas.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Instalación local
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Requisitos: PHP con `pdo_sqlite`, `mbstring`, `openssl` y `bcmath`; Composer; Node.js es opcional porque las vistas actuales usan recursos estáticos públicos.
 
-## Learning Laravel
+```bash
+git clone https://github.com/hola0202bhola-bit/laravel-app.git
+cd laravel-app
+composer install
+cp .env.example .env
+php artisan key:generate
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+Crear la base SQLite vacía:
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+```bash
+# Linux/macOS/Git Bash
+touch database/database.sqlite
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+# Windows PowerShell
+New-Item database/database.sqlite -ItemType File -Force
+```
 
-## Laravel Sponsors
+Preparar el esquema y los datos de demostración:
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```bash
+php artisan migrate:fresh --seed
+php artisan serve
+```
 
-### Premium Partners
+La aplicación queda disponible normalmente en `http://127.0.0.1:8000`.
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+## Configuración de `.env`
 
-## Contributing
+El archivo `.env.example` está preparado para SQLite. Las variables mínimas son:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```dotenv
+APP_NAME="Café Sublime"
+APP_ENV=local
+APP_DEBUG=true
+APP_URL=http://127.0.0.1:8000
+DB_CONNECTION=sqlite
+SESSION_DRIVER=file
+QUEUE_CONNECTION=sync
+```
 
-## Code of Conduct
+No es necesario definir `DB_DATABASE`: Laravel utiliza `database/database.sqlite`. La `APP_KEY` se genera con `php artisan key:generate`. No se deben compartir ni versionar archivos `.env` reales.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Cuentas de demostración
 
-## Security Vulnerabilities
+Todas usan la contraseña ficticia `Demo123!`.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+| Rol | Correo | Acceso principal |
+|---|---|---|
+| Administrador | `admin@cafesublime.test` | `/empleado` y funciones administrativas |
+| Gerente | `gerente@cafesublime.test` | `/empleado` y funciones administrativas |
+| Barista/Cocinero | `cocina@cafesublime.test` | `/cocina` y operación KDS |
 
-## License
+Los seeders también generan roles de Mesero y Cajero, sin cuentas demo porque esos módulos de administración de usuarios no forman parte del alcance.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Rutas principales
+
+| Ruta | Uso |
+|---|---|
+| `/cliente` | Menú, personalización, carrito, creación de pedidos y reservaciones |
+| `/empleado/login` | Inicio de sesión administrativo |
+| `/empleado` | Dashboard, pedidos, ventas, categorías, productos e inventario |
+| `/cocina` | Inicio de sesión y tablero KDS |
+| `GET /api/pedidos/seguimiento` | Seguimiento mediante `X-Tracking-Token` |
+| `/api/admin/*` | API Sanctum para Administrador y Gerente |
+| `/api/cocina/*` | API Sanctum para operación de cocina |
+
+El pedido precargado usa el token académico `demo-tracking-001`. Los pedidos creados desde `/cliente` devuelven su propio token de seguimiento.
+
+## Módulos terminados
+
+- Catálogo público con filtros, alérgenos, etiquetas y productos personalizables.
+- Creación de pedidos para llevar, mesa o delivery.
+- Reservación de mesas.
+- KDS con estados por artículo, transiciones validadas, bloqueo optimista y auditoría.
+- Seguimiento público limitado por token, sin exponer importes ni datos administrativos.
+- Login administrativo independiente y API protegida.
+- CRUD de categorías y productos.
+- Ajustes transaccionales de existencias e historial de inventario.
+- Dashboard con pedidos, ventas, analítica básica y productos con poco stock.
+- Compatibilidad de esquema y pruebas de migración entre SQLite y PostgreSQL.
+
+## Roles y permisos
+
+- **Administrador y Gerente:** acceso al panel y a `/api/admin`; pueden consultar pedidos, ventas y analítica, administrar categorías y productos, y ajustar inventario.
+- **Barista/Cocinero:** acceso al KDS y actualización de estados de preparación. No puede acceder a la API administrativa.
+- **Mesero y Cajero:** roles de dominio incluidos para futuras ampliaciones; no tienen módulos propios en esta entrega.
+
+Los tokens KDS tienen alcance `kitchen`; los tokens temporales del panel tienen alcance `admin`. Un token KDS no puede reutilizarse para consultar o modificar administración.
+
+## Flujo principal
+
+1. El cliente selecciona productos en `/cliente`, configura tamaño y extras, y confirma el pedido.
+2. Laravel valida productos y existencias, calcula importes con precisión decimal, descuenta stock y crea el pedido y la venta.
+3. El pedido aparece en `/cocina`; el barista inicia y termina artículos individualmente.
+4. El estado de preparación se recalcula sin sobrescribir el estado comercial del pedido.
+5. El cliente consulta el avance con el token de seguimiento recibido al crear el pedido.
+6. Administrador o Gerente revisan ventas, pedidos, bajo stock y movimientos desde `/empleado`.
+
+## Esquema general de datos
+
+- **Identidad y permisos:** `users`, `roles`, `user_roles`, `personal_access_tokens`.
+- **Catálogo:** `categories`, `products`, `allergens`, `dietary_tags` y tablas pivote.
+- **Personalización:** `custom_bases`, `custom_options`, `custom_items`, extras y recetas.
+- **Operación:** `orders`, `sales`, `sale_details`, `order_statuses`, `order_status_histories`.
+- **Inventario:** `ingredients`, `inventory_logs`, proveedores y relaciones de ingredientes.
+- **Salón:** `dining_tables`, `table_reservations`.
+- **Migración controlada:** `data_migration_runs`, `data_migration_checkpoints`.
+
+Las relaciones históricas de producto usan `product_codigo → products.codigo`. `products.category_id` es opcional y queda en `NULL` al eliminar la categoría.
+
+## Decisiones técnicas importantes
+
+- Los importes se guardan en columnas `decimal`, se exponen con casts `decimal:2` y se calculan con BCMath; no se usa punto flotante para dinero.
+- Los estados de preparación KDS están separados del estado comercial para evitar cambios destructivos.
+- Las actualizaciones KDS utilizan control de versión y registran auditoría por artículo.
+- Los ajustes de inventario bloquean el producto dentro de una transacción y rechazan existencias negativas.
+- Las consultas y mutaciones administrativas requieren Sanctum, alcance `admin` y rol Administrador o Gerente.
+- El seguimiento utiliza tokens aleatorios y una respuesta reducida, además de limitación de solicitudes.
+
+## Pruebas
+
+```bash
+php artisan test
+```
+
+La suite cubre seguridad 401/403, permisos, KDS, tracking, CRUD administrativo, inventario, precisión decimal y compatibilidad de migración. El workflow `.github/workflows/laravel.yml` ejecuta la suite con PostgreSQL en CI.
+
+## Guion breve de presentación
+
+1. Ejecutar `php artisan migrate:fresh --seed` y `php artisan serve`.
+2. Abrir `/cliente`, agregar un producto y confirmar el pedido; conservar el token mostrado.
+3. Abrir `/cocina`, iniciar sesión como Barista y avanzar el artículo de pendiente a listo.
+4. Consultar el pedido con su token para mostrar el tracking.
+5. Abrir `/empleado`, iniciar sesión como Administrador y enseñar dashboard, categorías y productos.
+6. Hacer un ajuste pequeño de inventario con motivo y mostrarlo en el historial.
+7. Cerrar sesión y explicar las respuestas 401/403 cubiertas por las pruebas.
