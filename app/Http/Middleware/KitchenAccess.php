@@ -18,14 +18,24 @@ class KitchenAccess
 
         // Default to all authorized kitchen roles if none specified
         if (empty($roles)) {
-            $roles = ['cocina', 'gerente', 'administrador'];
+            $roles = ['cocina', 'Barista/Cocinero', 'gerente', 'administrador'];
         }
 
+        $userRoles = $user->roles()->pluck('nombre')->toArray();
         $hasAccess = false;
+
         foreach ($roles as $role) {
-            if ($user->hasRole($role)) {
-                $hasAccess = true;
-                break;
+            foreach ($userRoles as $userRole) {
+                // Case-insensitive check
+                if (strcasecmp($userRole, $role) === 0) {
+                    $hasAccess = true;
+                    break 2;
+                }
+                // Map 'cocina' alias to 'Barista/Cocinero'
+                if (strcasecmp($role, 'cocina') === 0 && strcasecmp($userRole, 'Barista/Cocinero') === 0) {
+                    $hasAccess = true;
+                    break 2;
+                }
             }
         }
 
