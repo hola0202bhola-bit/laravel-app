@@ -54,7 +54,7 @@ class AdminReportController extends Controller
 
         $end = isset($data['fecha_fin'])
             ? CarbonImmutable::createFromFormat('Y-m-d', $data['fecha_fin'])->startOfDay()
-            : CarbonImmutable::today();
+            : now()->toImmutable()->startOfDay();
         $start = isset($data['fecha_inicio'])
             ? CarbonImmutable::createFromFormat('Y-m-d', $data['fecha_inicio'])->startOfDay()
             : $end->subDays(29);
