@@ -14,7 +14,13 @@ Sistema académico de operación para una cafetería. Integra menú y pedidos pa
 
 ## Instalación local
 
-Requisitos: PHP con `pdo_sqlite`, `mbstring`, `openssl` y `bcmath`; Composer; Node.js es opcional porque las vistas actuales usan recursos estáticos públicos.
+Requisitos:
+
+- Git.
+- PHP 8.1 o superior con `pdo_sqlite`, `mbstring`, `openssl` y `bcmath`.
+- Composer.
+- Node.js es opcional: la versión actual usa los recursos estáticos incluidos en `public`.
+- Para validar el perfil PostgreSQL se requieren PostgreSQL 15 y `pdo_pgsql`, pero no son necesarios para la demo local con SQLite.
 
 ```bash
 git clone https://github.com/hola0202bhola-bit/laravel-app.git
@@ -22,6 +28,12 @@ cd laravel-app
 composer install
 cp .env.example .env
 php artisan key:generate
+```
+
+En Windows PowerShell, sustituir `cp` por:
+
+```powershell
+Copy-Item .env.example .env
 ```
 
 Crear la base SQLite vacía:
@@ -69,7 +81,7 @@ Todas usan la contraseña ficticia `Demo123!`.
 | Gerente | `gerente@cafesublime.test` | `/empleado` y funciones administrativas |
 | Barista/Cocinero | `cocina@cafesublime.test` | `/cocina` y operación KDS |
 
-Los seeders también generan roles de Mesero y Cajero, sin cuentas demo porque esos módulos de administración de usuarios no forman parte del alcance.
+Los seeders también generan los roles de dominio Mesero y Cajero, pero no crean cuentas demo para ellos.
 
 ## Rutas principales
 
@@ -77,7 +89,7 @@ Los seeders también generan roles de Mesero y Cajero, sin cuentas demo porque e
 |---|---|
 | `/cliente` | Menú, personalización, carrito, creación de pedidos y reservaciones |
 | `/empleado/login` | Inicio de sesión administrativo |
-| `/empleado` | Dashboard, pedidos, ventas, categorías, productos e inventario |
+| `/empleado` | Dashboard, pedidos, ventas, catálogo, menús, reservaciones, inventario y reportes |
 | `/cocina` | Inicio de sesión y tablero KDS |
 | `GET /api/pedidos/seguimiento` | Seguimiento mediante `X-Tracking-Token` |
 | `/api/admin/*` | API Sanctum para Administrador y Gerente |
@@ -93,14 +105,17 @@ El pedido precargado usa el token académico `demo-tracking-001`. Los pedidos cr
 - KDS con estados por artículo, transiciones validadas, bloqueo optimista y auditoría.
 - Seguimiento público limitado por token, sin exponer importes ni datos administrativos.
 - Login administrativo independiente y API protegida.
-- CRUD de categorías y productos.
+- Gestión no destructiva del ciclo de vida de productos y categorías.
+- Suspensión y reanudación temporal de productos.
+- Menús manuales monositio y composición de productos, sin horarios automáticos.
 - Ajustes transaccionales de existencias e historial de inventario.
-- Dashboard con pedidos, ventas, analítica básica y productos con poco stock.
+- Dashboard con pedidos, ventas, reservaciones, analítica y productos con poco stock.
+- Reportes con periodo predeterminado de 30 días inclusivos y exportaciones CSV.
 - Compatibilidad de esquema y pruebas de migración entre SQLite y PostgreSQL.
 
 ## Roles y permisos
 
-- **Administrador y Gerente:** acceso al panel y a `/api/admin`; pueden consultar pedidos, ventas y analítica, administrar categorías y productos, y ajustar inventario.
+- **Administrador y Gerente:** acceso al panel y a `/api/admin`; pueden consultar pedidos, ventas y reportes, administrar catálogo, menús y reservaciones, y ajustar inventario.
 - **Barista/Cocinero:** acceso al KDS y actualización de estados de preparación. No puede acceder a la API administrativa.
 - **Mesero y Cajero:** roles de dominio incluidos para futuras ampliaciones; no tienen módulos propios en esta entrega.
 
@@ -118,14 +133,14 @@ Los tokens KDS tienen alcance `kitchen`; los tokens temporales del panel tienen 
 ## Esquema general de datos
 
 - **Identidad y permisos:** `users`, `roles`, `user_roles`, `personal_access_tokens`.
-- **Catálogo:** `categories`, `products`, `allergens`, `dietary_tags` y tablas pivote.
+- **Catálogo:** `categories`, `products`, `menus`, `menu_product`, `allergens`, `dietary_tags` y tablas pivote.
 - **Personalización:** `custom_bases`, `custom_options`, `custom_items`, extras y recetas.
 - **Operación:** `orders`, `sales`, `sale_details`, `order_statuses`, `order_status_histories`.
 - **Inventario:** `ingredients`, `inventory_logs`, proveedores y relaciones de ingredientes.
 - **Salón:** `dining_tables`, `table_reservations`.
 - **Migración controlada:** `data_migration_runs`, `data_migration_checkpoints`.
 
-Las relaciones históricas de producto usan `product_codigo → products.codigo`. `products.category_id` es opcional y queda en `NULL` al eliminar la categoría.
+Las relaciones históricas de producto usan `product_codigo → products.codigo`. Productos y categorías se desactivan sin borrarse; desactivar una categoría conserva `products.category_id` y oculta sus productos del catálogo público.
 
 ## Decisiones técnicas importantes
 
@@ -142,18 +157,14 @@ Las relaciones históricas de producto usan `product_codigo → products.codigo`
 php artisan test
 ```
 
-La suite cubre seguridad 401/403, permisos, KDS, tracking, CRUD administrativo, inventario, precisión decimal y compatibilidad de migración. El workflow `.github/workflows/laravel.yml` ejecuta la suite con PostgreSQL en CI.
+La suite cubre seguridad 401/403, permisos, KDS, tracking, lifecycle de catálogo, menús, reservaciones, inventario, reportes, precisión decimal y compatibilidad de migración. El workflow `.github/workflows/laravel.yml` ejecuta la suite con PostgreSQL en CI.
 
 ## Despliegue académico en Render
 
 La demostración remota utiliza SQLite efímera. Render puede reiniciar o reemplazar el sistema de archivos y, por tanto, restablecer la base; al iniciar el contenedor, las migraciones y los datos ficticios se regeneran automáticamente. Como el servicio académico puede entrar en inactividad, el primer acceso posterior puede tardar mientras el contenedor vuelve a iniciar.
 
-## Guion breve de presentación
+## Presentación
 
-1. Ejecutar `php artisan migrate:fresh --seed` y `php artisan serve`.
-2. Abrir `/cliente`, agregar un producto y confirmar el pedido; conservar el token mostrado.
-3. Abrir `/cocina`, iniciar sesión como Barista y avanzar el artículo de pendiente a listo.
-4. Consultar el pedido con su token para mostrar el tracking.
-5. Abrir `/empleado`, iniciar sesión como Administrador y enseñar dashboard, categorías y productos.
-6. Hacer un ajuste pequeño de inventario con motivo y mostrarlo en el historial.
-7. Cerrar sesión y explicar las respuestas 401/403 cubiertas por las pruebas.
+El guion reproducible de 8–12 minutos, las credenciales, los resultados esperados y el procedimiento de recuperación están en [`docs/DEMO.md`](docs/DEMO.md).
+
+Esta entrega no representa pagos bancarios reales, logística de delivery, cuentas persistentes de cliente, un POS industrial, HACCP formal, operación multisucursal, nómina, marketplace ni fiscalización CFDI. Son exclusiones deliberadas del alcance académico.
