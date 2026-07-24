@@ -442,6 +442,27 @@ class DataMigrationTest extends TestCase
         $this->assertEquals(0, $exitCode);
     }
 
+    public function test_boolean_columns_are_normalized_between_sqlite_and_postgresql()
+    {
+        DB::connection('migration_source')->table('products')->insert([
+            'id' => 1,
+            'codigo' => 101,
+            'precio' => '15.50',
+            'is_active' => 0,
+            'is_available' => 1,
+        ]);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true,
+        ])->run();
+
+        $this->assertEquals(0, $exitCode);
+        $this->assertFalse((bool) DB::connection('migration_target')->table('products')->where('id', 1)->value('is_active'));
+        $this->assertTrue((bool) DB::connection('migration_target')->table('products')->where('id', 1)->value('is_available'));
+    }
+
     public function test_source_sqlite_connection_enforces_read_only_and_fails_writes()
     {
         DB::connection('migration_source')->table('users')->insert(['id' => 98, 'name' => 'Initial User']);

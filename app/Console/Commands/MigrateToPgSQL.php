@@ -1139,7 +1139,7 @@ class MigrateToPgSQL extends Command
                 foreach ($columns as $col) {
                     try {
                         $type = Schema::connection($targetConn)->getColumnType($table, $col);
-                        if ($type === 'boolean') {
+                        if (in_array($type, ['boolean', 'bool'], true)) {
                             $bools[] = $col;
                         }
                     } catch (\Throwable $ex) {
