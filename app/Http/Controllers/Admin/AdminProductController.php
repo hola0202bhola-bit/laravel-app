@@ -53,23 +53,26 @@ class AdminProductController extends Controller
         return response()->json($product->fresh()->load('category'));
     }
 
-    public function destroy(Product $product)
+    public function updateStatus(Request $request, Product $product)
     {
-        $hasSales = DB::table('sale_details')->where('product_codigo', $product->codigo)->exists();
-        if ($hasSales) {
-            return response()->json([
-                'message' => 'No se puede eliminar un producto con ventas registradas.',
-            ], 409);
-        }
+        $data = $request->validate([
+            'is_active' => ['required', 'boolean'],
+        ]);
 
-        DB::transaction(function () use ($product) {
-            foreach (['product_allergens', 'product_dietary_tags', 'product_recipes', 'product_extras'] as $table) {
-                DB::table($table)->where('product_codigo', $product->codigo)->delete();
-            }
-            $product->delete();
-        });
+        $product->update($data);
 
-        return response()->noContent();
+        return response()->json($product->fresh()->load('category'));
+    }
+
+    public function updateAvailability(Request $request, Product $product)
+    {
+        $data = $request->validate([
+            'is_available' => ['required', 'boolean'],
+        ]);
+
+        $product->update($data);
+
+        return response()->json($product->fresh()->load('category'));
     }
 
     private function validateProduct(Request $request, ?Product $product = null): array
@@ -85,6 +88,8 @@ class AdminProductController extends Controller
             'descripcion' => ['nullable', 'string'],
             'imagen' => ['nullable', 'string', 'max:2048'],
             'extras' => ['nullable', 'array'],
+            'is_active' => ['sometimes', 'boolean'],
+            'is_available' => ['sometimes', 'boolean'],
         ]);
     }
 }

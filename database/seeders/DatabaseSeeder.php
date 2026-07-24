@@ -14,6 +14,7 @@ use App\Models\DiningTable;
 use App\Models\PaymentMethod;
 use App\Models\DeliveryProvider;
 use App\Models\InventoryLog;
+use App\Models\Menu;
 use App\Models\Order;
 use App\Models\Sale;
 use App\Models\TableReservation;
@@ -176,6 +177,17 @@ class DatabaseSeeder extends Seeder
                 ]);
             }
         }
+
+        $defaultMenu = Menu::firstOrCreate(
+            ['name' => 'Menú principal'],
+            [
+                'description' => 'Menú predeterminado de Café Sublime.',
+                'is_active' => true,
+            ]
+        );
+        $defaultMenu->products()->syncWithoutDetaching(
+            Product::whereIn('codigo', array_column($products, 'codigo'))->pluck('id')
+        );
 
         $demoItems = [[
             'id' => 'demo_item_1',

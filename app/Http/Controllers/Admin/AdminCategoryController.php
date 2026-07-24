@@ -41,11 +41,14 @@ class AdminCategoryController extends Controller
         return response()->json($category->fresh()->loadCount('products'));
     }
 
-    public function destroy(Category $category)
+    public function updateStatus(Request $request, Category $category)
     {
-        $category->products()->update(['category_id' => null]);
-        $category->delete();
+        $data = $request->validate([
+            'is_active' => ['required', 'boolean'],
+        ]);
 
-        return response()->noContent();
+        $category->update($data);
+
+        return response()->json($category->fresh()->loadCount('products'));
     }
 }

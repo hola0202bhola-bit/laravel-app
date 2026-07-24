@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use Tests\TestCase;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\Menu;
 use App\Models\User;
 use App\Models\Role;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -22,7 +23,7 @@ class KitchenTest extends TestCase
         parent::setUp();
 
         // Seed basic products
-        Product::create([
+        $product = Product::create([
             'codigo' => 1,
             'nombre' => 'Americano Tradicional',
             'precio' => 35.00,
@@ -31,6 +32,8 @@ class KitchenTest extends TestCase
             'descripcion' => 'Café negro suave',
             'extras' => []
         ]);
+        $menu = Menu::create(['name' => 'Menú de pruebas', 'is_active' => true]);
+        $menu->products()->attach($product);
 
         // Seed roles
         $roleAdmin = Role::create(['id' => 1, 'nombre' => 'Administrador']);

@@ -117,7 +117,10 @@ class DataMigrationTest extends TestCase
                 $table->timestamps();
             },
             'roles' => function ($table) { $table->id(); },
-            'categories' => function ($table) { $table->id(); },
+            'categories' => function ($table) {
+                $table->id();
+                $table->boolean('is_active')->default(true);
+            },
             'allergens' => function ($table) { $table->id(); },
             'dietary_tags' => function ($table) { $table->id(); },
             'ingredients' => function ($table) {
@@ -145,12 +148,21 @@ class DataMigrationTest extends TestCase
                 $table->decimal('comision_porcentaje', 5, 2)->default(0.00);
             },
             'payment_methods' => function ($table) { $table->id(); },
+            'menus' => function ($table) {
+                $table->id();
+                $table->string('name')->nullable();
+                $table->string('description')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
+            },
             'products' => function ($table) {
                 $table->id();
                 $table->integer('category_id')->nullable();
                 $table->integer('codigo')->unique();
                 $table->decimal('precio', 8, 2);
                 $table->json('extras')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->boolean('is_available')->default(true);
                 $table->timestamps();
             },
             'sales' => function ($table) {
@@ -190,6 +202,12 @@ class DataMigrationTest extends TestCase
                 $table->id();
                 $table->integer('product_codigo')->nullable();
                 $table->integer('extra_ingredient_id')->nullable();
+            },
+            'menu_product' => function ($table) {
+                $table->id();
+                $table->integer('menu_id')->nullable();
+                $table->integer('product_id')->nullable();
+                $table->timestamps();
             },
             'custom_items' => function ($table) {
                 $table->id();

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Product;
+use App\Models\Menu;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,10 +33,13 @@ class DeliveryReadinessTest extends TestCase
 
         $this->assertSame(15, Product::count());
         $this->assertSame(0, Product::whereNull('category_id')->count());
+        $this->assertSame(1, Menu::where('name', 'Menú principal')->count());
+        $this->assertSame(15, Menu::where('name', 'Menú principal')->firstOrFail()->products()->count());
         $this->assertDatabaseCount('inventory_logs', 15);
         $this->assertDatabaseCount('dining_tables', 8);
         $this->assertDatabaseHas('table_reservations', ['folio' => 'DEMO-001']);
         $this->assertDatabaseHas('orders', ['tracking_token' => 'demo-tracking-001']);
+        $this->getJson('/api/productos')->assertOk()->assertJsonCount(15);
     }
 
     public function test_main_pages_and_demo_login_logout_are_functional(): void
@@ -60,6 +64,8 @@ class DeliveryReadinessTest extends TestCase
 
         $this->assertDatabaseCount('users', 3);
         $this->assertDatabaseCount('products', 15);
+        $this->assertDatabaseCount('menus', 1);
+        $this->assertDatabaseCount('menu_product', 15);
         $this->assertDatabaseCount('inventory_logs', 15);
         $this->assertDatabaseCount('orders', 1);
         $this->assertDatabaseCount('sales', 1);

@@ -33,6 +33,9 @@ class OrderController extends Controller
             if (!$product) {
                 return response()->json(['error' => "Error: El producto con código {$item['codigo']} no existe."], 404);
             }
+            if (!$product->isSellable()) {
+                return response()->json(['error' => "Error: El producto '{$product->nombre}' no está disponible para venta."], 409);
+            }
             if ($item['cantidad'] > $product->existencia) {
                 return response()->json(['error' => "Error: No hay suficiente stock de '{$product->nombre}'. Disponible: {$product->existencia}"], 400);
             }
