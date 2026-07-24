@@ -12,6 +12,7 @@ use App\Http\Controllers\KitchenController;
 use App\Http\Controllers\Admin\AdminCategoryController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminInventoryController;
+use App\Http\Controllers\Admin\AdminMenuController;
 use App\Http\Controllers\Admin\AdminProductController;
 use App\Http\Controllers\Admin\AdminReservationController;
 use App\Http\Controllers\Admin\AdminUserController;
@@ -53,9 +54,19 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin.access'])->group(func
     Route::apiResource('reservations', AdminReservationController::class)
         ->only(['index', 'show', 'update', 'destroy']);
 
-    Route::apiResource('categories', AdminCategoryController::class);
+    Route::apiResource('categories', AdminCategoryController::class)->except('destroy');
+    Route::patch('/categories/{category}/status', [AdminCategoryController::class, 'updateStatus']);
     Route::apiResource('products', AdminProductController::class)
+        ->except('destroy')
         ->parameters(['products' => 'product:codigo']);
+    Route::patch('/products/{product:codigo}/status', [AdminProductController::class, 'updateStatus']);
+    Route::patch('/products/{product:codigo}/availability', [AdminProductController::class, 'updateAvailability']);
+    Route::apiResource('menus', AdminMenuController::class)->only(['index', 'store', 'show', 'update']);
+    Route::patch('/menus/{menu}/status', [AdminMenuController::class, 'updateStatus']);
+    Route::put('/menus/{menu}/products/{product:codigo}', [AdminMenuController::class, 'addProduct'])
+        ->withoutScopedBindings();
+    Route::delete('/menus/{menu}/products/{product:codigo}', [AdminMenuController::class, 'removeProduct'])
+        ->withoutScopedBindings();
     Route::get('/inventory', [AdminInventoryController::class, 'index']);
     Route::post('/inventory/adjustments', [AdminInventoryController::class, 'adjust']);
     Route::get('/reports', [AdminReportController::class, 'index']);

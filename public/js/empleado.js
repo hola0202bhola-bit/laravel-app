@@ -5,10 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let reservations = [];
     let diningTables = [];
     let categories = [];
+    let menus = [];
     let inventoryHistory = [];
     let employees = [];
     let employeeRoles = [];
     let reportData = null;
+    let editingProduct = null;
     const adminToken = document.querySelector('meta[name="admin-api-token"]')?.content;
 
     async function adminFetch(path, options = {}) {
@@ -58,7 +60,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const registerCategory = document.getElementById('reg-category');
     const formCategory = document.getElementById('form-categoria');
     const categoriesList = document.getElementById('categories-list');
-    const deleteProductButton = document.getElementById('delete-product');
+    const toggleProductActiveButton = document.getElementById('toggle-product-active');
+    const toggleProductAvailabilityButton = document.getElementById('toggle-product-availability');
+    const formMenu = document.getElementById('form-menu');
+    const menusList = document.getElementById('menus-list');
     const editReservationModal = document.getElementById('edit-reservation-modal');
     const closeReservationModal = document.getElementById('close-reservation-modal');
     const formReservation = document.getElementById('form-reservation');
@@ -137,7 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function refreshAllData() {
         try {
-            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchTables(), fetchReport(), fetchCategories(), fetchInventoryHistory(), fetchEmployees()]);
+            await Promise.all([fetchProducts(), fetchSales(), fetchOrders(), fetchReservations(), fetchTables(), fetchReport(), fetchCategories(), fetchMenus(), fetchInventoryHistory(), fetchEmployees()]);
             updateStats();
             renderCatalog();
             updateDropdowns();
@@ -145,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderSalesTable();
             renderReservationsTable();
             renderCategories();
+            renderMenus();
             renderEmployeesTable();
         } catch (e) {
             logToTerminal('Error al conectar con el servidor.');
@@ -202,6 +208,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await adminFetch('/categories?t=' + Date.now());
         categories = await res.json();
         updateCategorySelects();
+    }
+
+    async function fetchMenus() {
+        const res = await adminFetch('/menus?t=' + Date.now());
+        menus = await res.json();
     }
 
     async function fetchInventoryHistory() {
@@ -626,6 +637,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const pPrecio = parseFloat(prod.precio || prod.Precio);
             const pExistencia = parseInt(prod.existencia || prod.Existencia);
             const pImagen = prod.imagen || prod.Imagen;
+            const isActive = prod.is_active !== false;
+            const isAvailable = prod.is_available !== false;
 
             const card = document.createElement('div');
             card.className = 'product-card';
@@ -644,6 +657,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="product-code">COD: ${pCodigo}</span>
                         <span class="stock-badge ${stockClass}">${stockLabel}</span>
                     </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;">
+                        <span class="stock-badge ${isActive ? 'available' : 'out'}">${isActive ? 'Activo' : 'Inactivo'}</span>
+                        <span class="stock-badge ${isAvailable ? 'available' : 'low'}">${isAvailable ? 'Disponible' : 'Suspendido'}</span>
+                    </div>
                     <div class="product-info"><h3>${pNombre}</h3></div>
                     <div class="product-footer">
                         <span class="product-price">$${pPrecio.toFixed(2)}</span>
@@ -653,7 +670,17 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
 
             card.addEventListener('click', () => {
-                openEditProductModal({ Codigo: pCodigo, Nombre: pNombre, Precio: pPrecio, Existencia: pExistencia, Imagen: pImagen, Descripcion: prod.descripcion || prod.Descripcion, CategoryId: prod.category_id });
+                openEditProductModal({
+                    Codigo: pCodigo,
+                    Nombre: pNombre,
+                    Precio: pPrecio,
+                    Existencia: pExistencia,
+                    Imagen: pImagen,
+                    Descripcion: prod.descripcion || prod.Descripcion,
+                    CategoryId: prod.category_id,
+                    IsActive: isActive,
+                    IsAvailable: isAvailable
+                });
             });
 
             productsGrid.appendChild(card);
@@ -663,6 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openEditProductModal(product) {
+        editingProduct = product;
         editCodigo.value = product.Codigo;
         editNombre.value = product.Nombre;
         editDescripcion.value = product.Descripcion || '';
@@ -670,6 +698,8 @@ document.addEventListener('DOMContentLoaded', () => {
         editExistencia.value = product.Existencia;
         editImagen.value = product.Imagen || '';
         editCategory.value = product.CategoryId || '';
+        toggleProductActiveButton.innerText = product.IsActive ? 'Desactivar producto' : 'Reactivar producto';
+        toggleProductAvailabilityButton.innerText = product.IsAvailable ? 'Suspender venta' : 'Reanudar venta';
         editProductModal.classList.add('active');
     }
 
@@ -849,7 +879,10 @@ document.addEventListener('DOMContentLoaded', () => {
         [registerCategory, editCategory].forEach(select => {
             const current = select.value;
             select.innerHTML = '<option value="">Sin categoría</option>';
-            categories.forEach(category => select.add(new Option(category.nombre, category.id)));
+            categories.forEach(category => select.add(new Option(
+                `${category.nombre}${category.is_active ? '' : ' (inactiva)'}`,
+                category.id
+            )));
             select.value = current;
         });
     }
@@ -859,19 +892,104 @@ document.addEventListener('DOMContentLoaded', () => {
         categories.forEach(category => {
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;justify-content:space-between;gap:8px;margin:6px 0;';
-            row.innerHTML = `<span>${category.icono || ''} ${category.nombre} (${category.products_count})</span><span><button data-edit>Editar</button> <button data-delete>Eliminar</button></span>`;
+            row.innerHTML = `
+                <span>${category.icono || ''} ${category.nombre} (${category.products_count})
+                    <strong>${category.is_active ? 'Activa' : 'Inactiva'}</strong>
+                </span>
+                <span><button data-edit>Editar</button> <button data-status>${category.is_active ? 'Desactivar' : 'Reactivar'}</button></span>
+            `;
             row.querySelector('[data-edit]').addEventListener('click', async () => {
                 const nombre = window.prompt('Nuevo nombre', category.nombre);
                 if (!nombre) return;
                 await adminFetch(`/categories/${category.id}`, { method: 'PUT', body: JSON.stringify({ nombre, icono: category.icono }) });
                 refreshAllData();
             });
-            row.querySelector('[data-delete]').addEventListener('click', async () => {
-                if (!window.confirm(`¿Eliminar la categoría ${category.nombre}?`)) return;
-                await adminFetch(`/categories/${category.id}`, { method: 'DELETE' });
+            row.querySelector('[data-status]').addEventListener('click', async () => {
+                const action = category.is_active ? 'desactivar' : 'reactivar';
+                if (!window.confirm(`¿${action} la categoría ${category.nombre}? Los productos no se eliminarán.`)) return;
+                await adminFetch(`/categories/${category.id}/status`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_active: !category.is_active })
+                });
                 refreshAllData();
             });
             categoriesList.appendChild(row);
+        });
+    }
+
+    function renderMenus() {
+        menusList.innerHTML = '';
+
+        if (menus.length === 0) {
+            menusList.innerHTML = '<p>No hay menús configurados.</p>';
+            return;
+        }
+
+        menus.forEach(menu => {
+            const productCodes = new Set((menu.products || []).map(product => product.codigo));
+            const availableProducts = catalog.filter(product => !productCodes.has(product.codigo));
+            const row = document.createElement('div');
+            row.style.cssText = 'border-top:1px solid rgba(255,255,255,.12);padding:12px 0;';
+            row.innerHTML = `
+                <div style="display:flex;justify-content:space-between;gap:8px;">
+                    <span><strong>${escapeHtml(menu.name)}</strong> — ${menu.is_active ? 'Activo' : 'Inactivo'}</span>
+                    <span><button data-edit>Editar</button> <button data-status>${menu.is_active ? 'Desactivar' : 'Activar'}</button></span>
+                </div>
+                <p style="color:var(--text-muted);">${escapeHtml(menu.description || 'Sin descripción')}</p>
+                <div data-products style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;"></div>
+                <div style="display:flex;gap:6px;">
+                    <select data-product-select style="flex:1;"></select>
+                    <button data-add-product ${availableProducts.length ? '' : 'disabled'}>Agregar</button>
+                </div>
+            `;
+
+            const productList = row.querySelector('[data-products]');
+            if ((menu.products || []).length === 0) {
+                productList.innerHTML = '<span>Sin productos.</span>';
+            } else {
+                menu.products.forEach(product => {
+                    const chip = document.createElement('span');
+                    chip.innerHTML = `${escapeHtml(product.nombre)} <button type="button" title="Retirar del menú">&times;</button>`;
+                    chip.querySelector('button').addEventListener('click', async () => {
+                        await adminFetch(`/menus/${menu.id}/products/${product.codigo}`, { method: 'DELETE' });
+                        refreshAllData();
+                    });
+                    productList.appendChild(chip);
+                });
+            }
+
+            const productSelect = row.querySelector('[data-product-select]');
+            availableProducts.forEach(product => productSelect.add(new Option(
+                `[${product.codigo}] ${product.nombre}`,
+                product.codigo
+            )));
+
+            row.querySelector('[data-add-product]').addEventListener('click', async () => {
+                if (!productSelect.value) return;
+                await adminFetch(`/menus/${menu.id}/products/${productSelect.value}`, { method: 'PUT' });
+                refreshAllData();
+            });
+
+            row.querySelector('[data-edit]').addEventListener('click', async () => {
+                const name = window.prompt('Nombre del menú', menu.name);
+                if (!name) return;
+                const description = window.prompt('Descripción', menu.description || '') ?? menu.description;
+                await adminFetch(`/menus/${menu.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ name, description })
+                });
+                refreshAllData();
+            });
+
+            row.querySelector('[data-status]').addEventListener('click', async () => {
+                await adminFetch(`/menus/${menu.id}/status`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_active: !menu.is_active })
+                });
+                refreshAllData();
+            });
+
+            menusList.appendChild(row);
         });
     }
 
@@ -898,17 +1016,54 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    deleteProductButton.addEventListener('click', async () => {
-        const codigo = editCodigo.value;
-        if (!window.confirm(`¿Eliminar el producto ${codigo}?`)) return;
-        const response = await adminFetch(`/products/${codigo}`, { method: 'DELETE' });
+    formMenu.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const name = document.getElementById('menu-name').value.trim();
+        const description = document.getElementById('menu-description').value.trim() || null;
+        const response = await adminFetch('/menus', {
+            method: 'POST',
+            body: JSON.stringify({ name, description })
+        });
         if (response.ok) {
-            logToTerminal('Éxito: Producto eliminado.');
+            logToTerminal(`Éxito: Menú ${name} creado.`);
+            formMenu.reset();
+            refreshAllData();
+        }
+    });
+
+    toggleProductActiveButton.addEventListener('click', async () => {
+        if (!editingProduct) return;
+        const nextState = !editingProduct.IsActive;
+        const action = nextState ? 'reactivar' : 'desactivar';
+        if (!window.confirm(`¿${action} el producto ${editingProduct.Codigo}? No se eliminará su historial.`)) return;
+        const response = await adminFetch(`/products/${editingProduct.Codigo}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: nextState })
+        });
+        if (response.ok) {
+            logToTerminal(`Éxito: Producto ${nextState ? 'reactivado' : 'desactivado'}.`);
             editProductModal.classList.remove('active');
             refreshAllData();
         } else {
             const data = await response.json();
-            logToTerminal(`Error: ${data.message || 'No se pudo eliminar.'}`);
+            logToTerminal(`Error: ${data.message || 'No se pudo cambiar la vigencia.'}`);
+        }
+    });
+
+    toggleProductAvailabilityButton.addEventListener('click', async () => {
+        if (!editingProduct) return;
+        const nextState = !editingProduct.IsAvailable;
+        const response = await adminFetch(`/products/${editingProduct.Codigo}/availability`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_available: nextState })
+        });
+        if (response.ok) {
+            logToTerminal(`Éxito: Venta ${nextState ? 'reanudada' : 'suspendida'} temporalmente.`);
+            editProductModal.classList.remove('active');
+            refreshAllData();
+        } else {
+            const data = await response.json();
+            logToTerminal(`Error: ${data.message || 'No se pudo cambiar la disponibilidad.'}`);
         }
     });
 

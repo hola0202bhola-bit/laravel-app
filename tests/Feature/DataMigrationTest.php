@@ -117,7 +117,10 @@ class DataMigrationTest extends TestCase
                 $table->timestamps();
             },
             'roles' => function ($table) { $table->id(); },
-            'categories' => function ($table) { $table->id(); },
+            'categories' => function ($table) {
+                $table->id();
+                $table->boolean('is_active')->default(true);
+            },
             'allergens' => function ($table) { $table->id(); },
             'dietary_tags' => function ($table) { $table->id(); },
             'ingredients' => function ($table) {
@@ -145,12 +148,21 @@ class DataMigrationTest extends TestCase
                 $table->decimal('comision_porcentaje', 5, 2)->default(0.00);
             },
             'payment_methods' => function ($table) { $table->id(); },
+            'menus' => function ($table) {
+                $table->id();
+                $table->string('name')->nullable();
+                $table->string('description')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
+            },
             'products' => function ($table) {
                 $table->id();
                 $table->integer('category_id')->nullable();
                 $table->integer('codigo')->unique();
                 $table->decimal('precio', 8, 2);
                 $table->json('extras')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->boolean('is_available')->default(true);
                 $table->timestamps();
             },
             'sales' => function ($table) {
@@ -190,6 +202,12 @@ class DataMigrationTest extends TestCase
                 $table->id();
                 $table->integer('product_codigo')->nullable();
                 $table->integer('extra_ingredient_id')->nullable();
+            },
+            'menu_product' => function ($table) {
+                $table->id();
+                $table->integer('menu_id')->nullable();
+                $table->integer('product_id')->nullable();
+                $table->timestamps();
             },
             'custom_items' => function ($table) {
                 $table->id();
@@ -422,6 +440,27 @@ class DataMigrationTest extends TestCase
         ])->run();
 
         $this->assertEquals(0, $exitCode);
+    }
+
+    public function test_boolean_columns_are_normalized_between_sqlite_and_postgresql()
+    {
+        DB::connection('migration_source')->table('products')->insert([
+            'id' => 1,
+            'codigo' => 101,
+            'precio' => '15.50',
+            'is_active' => 0,
+            'is_available' => 1,
+        ]);
+
+        $exitCode = $this->artisan('db:migrate-to-pgsql', [
+            '--source' => 'migration_source',
+            '--target' => 'migration_target',
+            '--force' => true,
+        ])->run();
+
+        $this->assertEquals(0, $exitCode);
+        $this->assertFalse((bool) DB::connection('migration_target')->table('products')->where('id', 1)->value('is_active'));
+        $this->assertTrue((bool) DB::connection('migration_target')->table('products')->where('id', 1)->value('is_available'));
     }
 
     public function test_source_sqlite_connection_enforces_read_only_and_fails_writes()

@@ -9,7 +9,7 @@ use Carbon\Carbon;
 
 class MigrateToPgSQL extends Command
 {
-    const MANIFEST_VERSION = '2.0.0';
+    const MANIFEST_VERSION = '2.1.0';
 
     /**
      * The name and signature of the console command.
@@ -49,6 +49,7 @@ class MigrateToPgSQL extends Command
         'order_statuses',
         'delivery_providers',
         'payment_methods',
+        'menus',
         'products',
         'sales',
         
@@ -59,6 +60,7 @@ class MigrateToPgSQL extends Command
         'ingredient_suppliers',
         'product_recipes',
         'product_extras',
+        'menu_product',
         'custom_items',
         'table_reservations',
         'orders',
@@ -587,6 +589,10 @@ class MigrateToPgSQL extends Command
                 'product_codigo'      => ['table' => 'products', 'column' => 'codigo'],
                 'extra_ingredient_id' => ['table' => 'extra_ingredients', 'column' => 'id'],
             ],
+            'menu_product' => [
+                'menu_id' => ['table' => 'menus', 'column' => 'id'],
+                'product_id' => ['table' => 'products', 'column' => 'id'],
+            ],
             'custom_items' => [
                 'custom_base_id' => ['table' => 'custom_bases', 'column' => 'id'],
             ],
@@ -1114,6 +1120,7 @@ class MigrateToPgSQL extends Command
         $map = [
             'suppliers' => ['contacto', 'telefono'],
             'categories' => ['icono'],
+            'menus' => ['description'],
             'allergens' => ['icono'],
             'table_reservations' => ['notas'],
             'orders' => ['codigo_delivery', 'numero_mesa'],
@@ -1132,7 +1139,7 @@ class MigrateToPgSQL extends Command
                 foreach ($columns as $col) {
                     try {
                         $type = Schema::connection($targetConn)->getColumnType($table, $col);
-                        if ($type === 'boolean') {
+                        if (in_array($type, ['boolean', 'bool'], true)) {
                             $bools[] = $col;
                         }
                     } catch (\Throwable $ex) {

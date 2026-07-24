@@ -92,7 +92,7 @@ class AdminDashboardTest extends TestCase
         }
     }
 
-    public function test_category_crud_and_null_on_delete_relation(): void
+    public function test_category_crud_and_deactivation_preserves_relation(): void
     {
         $this->actAsAdmin();
         $category = $this->postJson('/api/admin/categories', ['nombre' => 'Bebidas', 'icono' => 'coffee'])
@@ -102,8 +102,12 @@ class AdminDashboardTest extends TestCase
 
         $product = Product::create(['codigo' => 101, 'nombre' => 'Latte', 'precio' => '45.50', 'existencia' => 4, 'category_id' => $category['id']]);
         $this->assertSame('Bebidas frías', $product->category->nombre);
-        $this->deleteJson("/api/admin/categories/{$category['id']}")->assertNoContent();
-        $this->assertNull($product->fresh()->category_id);
+        $this->patchJson("/api/admin/categories/{$category['id']}/status", ['is_active' => false])
+            ->assertOk()->assertJsonPath('is_active', false);
+        $this->assertSame($category['id'], $product->fresh()->category_id);
+        $this->assertDatabaseHas('products', ['codigo' => 101]);
+        $this->patchJson("/api/admin/categories/{$category['id']}/status", ['is_active' => true])
+            ->assertOk()->assertJsonPath('is_active', true);
     }
 
     public function test_product_crud_validates_decimal_and_records_initial_stock(): void
@@ -120,8 +124,11 @@ class AdminDashboardTest extends TestCase
             ->assertOk()->assertJsonPath('precio', '31.25');
         $this->putJson('/api/admin/products/202', ['precio' => '31.999'])->assertUnprocessable();
         $this->getJson('/api/admin/products/202')->assertOk()->assertJsonPath('category.id', $category->id);
-        $this->deleteJson('/api/admin/products/202')->assertNoContent();
-        $this->assertDatabaseMissing('products', ['id' => $created['id']]);
+        $this->patchJson('/api/admin/products/202/status', ['is_active' => false])
+            ->assertOk()->assertJsonPath('is_active', false);
+        $this->assertDatabaseHas('products', ['id' => $created['id'], 'is_active' => false]);
+        $this->patchJson('/api/admin/products/202/status', ['is_active' => true])
+            ->assertOk()->assertJsonPath('is_active', true);
     }
 
     public function test_inventory_adjustment_is_logged_and_cannot_make_stock_negative(): void

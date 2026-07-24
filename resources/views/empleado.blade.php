@@ -359,6 +359,17 @@
                     <div id="categories-list" style="margin-top: 12px;"></div>
                 </div>
 
+                <div class="actions-container glass-card" style="margin-top: 20px; padding: 20px;">
+                    <h3>Menús y composición</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 12px;">Vigencia manual, sin horarios automáticos.</p>
+                    <form id="form-menu" class="action-form">
+                        <div class="form-group"><label for="menu-name">Nombre</label><input id="menu-name" required></div>
+                        <div class="form-group"><label for="menu-description">Descripción</label><input id="menu-description"></div>
+                        <button type="submit" class="btn-primary">Crear menú</button>
+                    </form>
+                    <div id="menus-list" style="margin-top: 12px;"></div>
+                </div>
+
                 <!-- TERMINAL LOG -->
                 <div class="terminal-container glass-card">
                     <div class="terminal-header">
@@ -421,7 +432,8 @@
                     <button type="submit" class="btn-primary">
                         <i data-lucide="save"></i> Guardar Cambios
                     </button>
-                    <button type="button" class="btn-secondary" id="delete-product">Eliminar producto</button>
+                    <button type="button" class="btn-secondary" id="toggle-product-active">Desactivar producto</button>
+                    <button type="button" class="btn-secondary" id="toggle-product-availability">Suspender venta</button>
                 </form>
             </div>
         </div>
